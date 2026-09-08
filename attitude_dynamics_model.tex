@@ -1,0 +1,332 @@
+% =====================================================================
+% Spacecraft Attitude Dynamics and Control Model — physics summary
+%
+% USAGE
+%   In your Overleaf project's main .tex file, add:
+%       \input{attitude_dynamics_model.tex}
+%   wherever you want the section to appear.
+%
+% REQUIRED PACKAGES (most Overleaf templates already load these)
+%       \usepackage{amsmath, amssymb}
+%       \usepackage{bm}     % bold math symbols
+%
+% BIBLIOGRAPHY
+%   Add the following entry to your .bib file so that \cite{markley2014}
+%   resolves correctly:
+%
+%   @book{markley2014,
+%     author    = {Markley, F. Landis and Crassidis, John L.},
+%     title     = {Fundamentals of Spacecraft Attitude Determination and Control},
+%     publisher = {Springer},
+%     year      = {2014},
+%     series    = {Space Technology Library},
+%     volume    = {33},
+%     address   = {New York, NY},
+%     doi       = {10.1007/978-1-4939-0802-8}
+%   }
+%
+%   If you are not using BibTeX, replace the \cite{markley2014} occurrences
+%   below with a manual reference such as "Markley \& Crassidis (2014)".
+% =====================================================================
+
+
+\section{Spacecraft Attitude Dynamics and Control Model}
+\label{sec:attitude-model}
+
+This section summarises the equations of motion used in the closed-loop
+attitude simulation. Sign conventions and equation numbering follow
+Markley and Crassidis~\cite{markley2014} throughout.
+
+
+% ---------------------------------------------------------------------
+\subsection{Quaternion Convention}
+\label{sec:quat-convention}
+
+We adopt the \emph{scalar-last} unit quaternion
+\begin{equation}
+\bm{q} \;=\; \begin{bmatrix} \bm{q}_v \\ q_4 \end{bmatrix} \in \mathbb{R}^{4},
+\qquad \bm{q}_v \in \mathbb{R}^{3},\; q_4 \in \mathbb{R},\; \|\bm{q}\| = 1,
+\label{eq:scalar-last-q}
+\end{equation}
+matching the layout used in Eq.~(2.84) of~\cite{markley2014}. The
+quaternion product is defined such that
+$\bm{A}(\bm{q}\otimes\bm{p}) = \bm{A}(\bm{q})\,\bm{A}(\bm{p})$
+(Eq.~2.82b of~\cite{markley2014}):
+\begin{equation}
+\bm{q}\otimes\bm{p} \;=\;
+\begin{bmatrix}
+ q_4\,\bm{p}_v + p_4\,\bm{q}_v - \bm{q}_v\times\bm{p}_v \\[2pt]
+ q_4\,p_4 - \bm{q}_v^{\!\top}\bm{p}_v
+\end{bmatrix},
+\qquad
+\bm{q}^{-1} \;=\; \begin{bmatrix} -\bm{q}_v \\ q_4 \end{bmatrix}.
+\end{equation}
+
+
+% ---------------------------------------------------------------------
+\subsection{Quaternion Kinematics}
+\label{sec:quat-kinematics}
+
+The rate of change of the body-to-inertial quaternion under body angular
+velocity $\bm{\omega}\in\mathbb{R}^{3}$ is
+(Eq.~2.88 of~\cite{markley2014})
+\begin{equation}
+\dot{\bm{q}}
+\;=\; \tfrac{1}{2}\,\bm{\Omega}(\bm{\omega})\,\bm{q}
+\;=\;
+\begin{bmatrix}
+ \tfrac{1}{2}\bigl(q_4\,\bm{\omega} - \bm{\omega}\times\bm{q}_v\bigr) \\[3pt]
+-\tfrac{1}{2}\,\bm{\omega}^{\!\top}\bm{q}_v
+\end{bmatrix}.
+\label{eq:quat-kin}
+\end{equation}
+
+
+% ---------------------------------------------------------------------
+\subsection{Rigid-Body Dynamics with Reaction Wheels}
+\label{sec:euler-wheels}
+
+For a spacecraft with symmetric, positive-definite inertia tensor
+$\bm{J}\in\mathbb{R}^{3\times3}$ (Eq.~3.13 of~\cite{markley2014})
+and internal wheel angular momentum $\bm{h}_w^{\,b}$ expressed in the body
+frame, Euler's rotational equation generalises to (Sec.~7.2
+of~\cite{markley2014})
+\begin{equation}
+\boxed{\;
+\bm{J}\,\dot{\bm{\omega}}
+\;=\;
+\bm{u}_{\text{body}}
+\;-\;
+\bm{\omega}\times\!\bigl(\bm{J}\bm{\omega} + \bm{h}_w^{\,b}\bigr).
+\;}
+\label{eq:euler-wheels}
+\end{equation}
+The total external torque on the body collects three contributions:
+\begin{equation}
+\bm{u}_{\text{body}} \;=\; -\bm{W}\bm{\tau}_w \;+\; \bm{\tau}_{\text{mag}}
+\;+\; \bm{T}_{\!s},
+\label{eq:u-body-decomp}
+\end{equation}
+the wheel reaction torque, the magnetic-torquer torque, and the propellant
+slosh torque defined in Sections~\ref{sec:bdot} and~\ref{sec:slosh}.
+
+
+% ---------------------------------------------------------------------
+\subsection{Reaction Wheels and Torque Allocation}
+\label{sec:wheels}
+
+We model $n_w$ momentum wheels whose spin-axis unit vectors form the
+columns of a configuration matrix
+$\bm{W}\in\mathbb{R}^{3\times n_w}$. The scalar wheel momenta about
+their spin axes are stacked into $\bm{h}_w\in\mathbb{R}^{n_w}$, so the
+body-frame wheel momentum is
+\begin{equation}
+\bm{h}_w^{\,b} \;=\; \bm{W}\,\bm{h}_w.
+\end{equation}
+With wheel torque commands $\bm{\tau}_w\in\mathbb{R}^{n_w}$, the wheels
+react $-\bm{W}\bm{\tau}_w$ onto the body and their internal momentum
+evolves as
+\begin{equation}
+\dot{\bm{h}}_w \;=\; \bm{\tau}_w.
+\end{equation}
+A desired body control torque $\bm{u}_{\text{cmd}}$ from the attitude
+controller is mapped to wheel commands by the minimum-norm pseudoinverse
+allocation
+\begin{equation}
+\bm{\tau}_w \;=\; -\bm{W}^{+}\,\bm{u}_{\text{cmd}},
+\qquad
+\bm{W}^{+} \;=\; \bm{W}^{\!\top}\!\bigl(\bm{W}\bm{W}^{\!\top}\bigr)^{-1}.
+\label{eq:wheel-alloc}
+\end{equation}
+
+\paragraph{NASA standard four-wheel pyramid.}
+The simulation uses the symmetric four-wheel pyramid configuration
+(Sec.~7.2 of~\cite{markley2014}). Each spin axis is tilted by
+$\beta = \arccos(1/\sqrt{3}) \approx 54.7356^\circ$ from the body $+z$
+axis and the four wheels are spaced $90^\circ$ apart in azimuth. This
+gives equal projection onto all three body axes and provides
+single-fault tolerance.
+
+
+% ---------------------------------------------------------------------
+\subsection{Quaternion-Feedback PD Controller}
+\label{sec:pd-controller}
+
+Given a desired attitude quaternion $\bm{q}_{\text{des}}$, the attitude
+error quaternion is
+\begin{equation}
+\delta\bm{q} \;=\; \bm{q}_{\text{des}}^{\,-1} \otimes \bm{q}
+\;=\; \bigl[\,\delta\bm{q}_v;\; \delta q_4\,\bigr]^{\!\top}.
+\end{equation}
+The quaternion-feedback proportional--derivative law of Sec.~7.4
+of~\cite{markley2014} is used, with element-wise saturation:
+\begin{equation}
+\bm{u}_{\text{cmd}} \;=\;
+\operatorname{sat}_{u_{\max}}\!\Bigl(
+ -K_p\,\operatorname{sign}(\delta q_4)\,\delta\bm{q}_v
+ \;-\; K_d\,\bm{\omega}
+\Bigr),
+\label{eq:pd}
+\end{equation}
+where $K_p, K_d > 0$ are scalar gains and
+$\operatorname{sat}_{u_{\max}}(\cdot)$ clips each component to
+$[-u_{\max},\, +u_{\max}]$. The factor
+$\operatorname{sign}(\delta q_4)$ selects the shortest rotation and
+prevents the well-known \emph{unwinding} phenomenon.
+
+
+% ---------------------------------------------------------------------
+\subsection{Magnetic Momentum Unloading}
+\label{sec:bdot}
+
+Reaction wheels accumulate angular momentum from disturbance torques
+until they saturate. Magnetic torquers transfer that momentum from the
+wheels to the geomagnetic field (Sec.~7.5 of~\cite{markley2014}). A
+magnetic dipole moment $\bm{m}\in\mathbb{R}^{3}$ commanded in a field
+$\bm{B}\in\mathbb{R}^{3}$ produces a body torque
+\begin{equation}
+\bm{\tau}_{\text{mag}} \;=\; \bm{m}\times\bm{B}.
+\end{equation}
+We use the cross-product (``$\bm{B}$-dot-style'') unloading law
+\begin{equation}
+\bm{m} \;=\;
+\operatorname{sat}_{m_{\max}}\!\biggl(
+\frac{K_{\text{dump}}}{\|\bm{B}\|^{2}}\,
+ \bm{h}_w^{\,b} \times \bm{B}
+\biggr),
+\label{eq:bdot}
+\end{equation}
+which (before saturation) yields the body torque
+\begin{equation}
+\bm{\tau}_{\text{mag}}
+\;=\;
+-K_{\text{dump}}\,
+\Bigl(\bm{h}_w^{\,b} - (\bm{h}_w^{\,b}\!\cdot\!\hat{\bm{B}})\,\hat{\bm{B}}\Bigr),
+\end{equation}
+i.e.\ a damping torque applied to the component of $\bm{h}_w^{\,b}$
+\emph{perpendicular} to $\bm{B}$. Orbital variation of $\bm{B}$ rotates
+the unloadable subspace and sweeps it through all three body axes over
+each orbit. The commanded dipole is saturated element-wise to
+$\bm{m}\in[-m_{\max},\,+m_{\max}]^{3}$.
+
+For the geomagnetic field, the simulation uses a simple inclined rotating
+dipole of magnitude $\sim\!30\,\mu\mathrm{T}$ as a low-Earth-orbit proxy;
+in flight-grade work this is replaced by an IGRF model rotated into the
+body frame.
+
+
+% ---------------------------------------------------------------------
+\subsection{Propellant Slosh Torque}
+\label{sec:slosh}
+
+Liquid propellant slosh is modelled as a forced, damped second-order
+oscillator acting on a 3-D torque state $\bm{T}_{\!s}\in\mathbb{R}^{3}$,
+driven by body rate $\bm{\omega}$ and body angular acceleration
+$\dot{\bm{\omega}}$:
+\begin{equation}
+\boxed{\;
+\ddot{\bm{T}}_{\!s}
+\;=\;
+ -A_s(t)\,\bm{\omega}
+ \;-\; B_s(t)\,\dot{\bm{\omega}}
+ \;-\; C_s(t)\,\dot{\bm{T}}_{\!s}
+ \;-\; K_s(t)\,\bm{T}_{\!s}.
+\;}
+\label{eq:slosh}
+\end{equation}
+The coefficients $A_s, B_s, C_s, K_s$ are scalars (identical on all three
+axes) and admit an optional sinusoidal time variation about a positive
+DC offset:
+\begin{equation}
+f(t) \;=\; f_{\text{nom}} + f_{\text{amp}}\sin(\omega_f\,t),
+\qquad f \in \{A_s,\,B_s,\,C_s,\,K_s\}.
+\label{eq:slosh-coeff}
+\end{equation}
+Requiring $f_{\text{nom}} > |f_{\text{amp}}|$ keeps $K_s,C_s$ strictly
+positive (a negative stiffness or damping would be unphysical).
+
+The slosh torque enters Euler's equation~\eqref{eq:euler-wheels} as an
+external disturbance through $\bm{T}_{\!s}$ in~\eqref{eq:u-body-decomp}.
+Because $\bm{T}_{\!s}$ is a \emph{state} (not an instantaneous algebraic
+function of $\dot{\bm{\omega}}$), there is no implicit loop:
+$\dot{\bm{\omega}}$ is computed from~\eqref{eq:euler-wheels} using the
+current $\bm{T}_{\!s}$, and the just-computed $\dot{\bm{\omega}}$ is then
+substituted into~\eqref{eq:slosh}.
+
+
+% ---------------------------------------------------------------------
+\subsection{State Vector and Equations of Motion}
+\label{sec:state}
+
+Collecting the previous results, the full simulation state is
+\begin{equation}
+\bm{x}(t) \;=\;
+\bigl[\,\bm{q};\; \bm{\omega};\; \bm{h}_w;\; \bm{T}_{\!s};\;
+       \dot{\bm{T}}_{\!s}\,\bigr]
+\;\in\; \mathbb{R}^{\,13+n_w},
+\end{equation}
+governed by
+\begin{align}
+\dot{\bm{q}} &= \tfrac{1}{2}\,\bm{\Omega}(\bm{\omega})\,\bm{q}
+   && \text{(kinematics, Eq.~\ref{eq:quat-kin})} \\[2pt]
+\bm{J}\,\dot{\bm{\omega}} &= \bm{u}_{\text{body}}
+ \;-\; \bm{\omega}\times\!\bigl(\bm{J}\bm{\omega}+\bm{W}\bm{h}_w\bigr)
+   && \text{(Euler, Eq.~\ref{eq:euler-wheels})} \\[2pt]
+\dot{\bm{h}}_w &= \bm{\tau}_w \;=\; -\bm{W}^{+}\bm{u}_{\text{cmd}}
+   && \text{(wheel momentum)} \\[2pt]
+\ddot{\bm{T}}_{\!s} &=
+   -A_s\bm{\omega} - B_s\dot{\bm{\omega}}
+   - C_s\dot{\bm{T}}_{\!s} - K_s\bm{T}_{\!s}
+   && \text{(slosh, Eq.~\ref{eq:slosh})}
+\end{align}
+with
+\(
+\bm{u}_{\text{body}} \;=\;
+-\bm{W}\bm{\tau}_w \;+\; \bm{m}\times\bm{B} \;+\; \bm{T}_{\!s},
+\)
+$\bm{u}_{\text{cmd}}$ given by~\eqref{eq:pd}, and $\bm{m}$
+given by~\eqref{eq:bdot}.
+
+
+% ---------------------------------------------------------------------
+\subsection{Euler-Angle Conversion}
+\label{sec:euler-conv}
+
+For initial-condition specification and post-processing visualisation,
+3-2-1 ($Z$-$Y$-$X$) yaw--pitch--roll Euler angles $(\phi,\theta,\psi)$
+are converted to and from the scalar-last quaternion using
+App.~B of~\cite{markley2014}:
+\begin{equation}
+\bm{q} \;=\; \bm{q}_z(\psi)\otimes\bm{q}_y(\theta)\otimes\bm{q}_x(\phi).
+\end{equation}
+The inverse extraction, used for the angle/rate output plots, is
+\begin{align}
+\phi   &= \operatorname{atan2}\!\bigl(2(q_4 q_1 + q_2 q_3),\;
+                                      1 - 2(q_1^{2} + q_2^{2})\bigr), \\[2pt]
+\theta &= \arcsin\!\bigl(\operatorname{clip}\bigl(2(q_4 q_2 - q_1 q_3),\,
+                                                  -1,\,+1\bigr)\bigr), \\[2pt]
+\psi   &= \operatorname{atan2}\!\bigl(2(q_4 q_3 + q_1 q_2),\;
+                                      1 - 2(q_2^{2} + q_3^{2})\bigr),
+\end{align}
+where the $\arcsin$ argument is clipped to $[-1,+1]$ for numerical
+robustness in the neighbourhood of the gimbal-lock singularity at
+$\theta = \pm 90^\circ$.
+
+
+% ---------------------------------------------------------------------
+\subsection{Numerical Integration}
+\label{sec:integration}
+
+Two integrators are provided for the augmented state:
+\begin{itemize}\setlength{\itemsep}{2pt}
+  \item a hand-written fixed-step classical fourth-order Runge--Kutta
+        (RK4) with quaternion re-normalisation after each step
+        (zero-order hold on controller outputs over each $\Delta t$);
+  \item an adaptive solver via SciPy's
+        \texttt{scipy.integrate.solve\_ivp}
+        (\texttt{RK45} / \texttt{DOP853} / \texttt{LSODA}), with the
+        closed-loop treated as a continuous-time system and quaternion
+        re-normalisation applied in post-processing.
+\end{itemize}
+Both integrators share the same dynamics, controller, and slosh
+modules; only the time-stepping strategy differs.

@@ -1,0 +1,509 @@
+% =====================================================================
+% Spacecraft Attitude Dynamics and Control — Session Summary
+%
+% USAGE
+%   Standalone:  compile this .tex directly (it's a complete document).
+%   Embedded:    strip the preamble (everything before \begin{document})
+%                and \input{session_summary.tex} into your existing project.
+%
+% BIBLIOGRAPHY
+%   The single \cite{markley2014} in this document needs the following
+%   entry in your .bib file:
+%
+%   @book{markley2014,
+%     author    = {Markley, F. Landis and Crassidis, John L.},
+%     title     = {Fundamentals of Spacecraft Attitude Determination and Control},
+%     publisher = {Springer},
+%     year      = {2014},
+%     series    = {Space Technology Library},
+%     volume    = {33},
+%     address   = {New York, NY},
+%     doi       = {10.1007/978-1-4939-0802-8}
+%   }
+%
+%   If you don't use BibTeX, find-and-replace \cite{markley2014} with
+%   "Markley \& Crassidis (2014)".
+% =====================================================================
+
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{tcolorbox}
+
+\hypersetup{colorlinks=true, linkcolor=blue!60!black, urlcolor=blue!60!black}
+
+\lstdefinestyle{pycode}{
+    language=Python,
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{blue!70!black}\bfseries,
+    stringstyle=\color{teal!70!black},
+    commentstyle=\color{gray}\itshape,
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    rulecolor=\color{black!20},
+    tabsize=4,
+    columns=flexible,
+    aboveskip=8pt,
+    belowskip=8pt,
+}
+\lstset{style=pycode}
+
+\title{Spacecraft Attitude Dynamics and Control Simulation\\[3pt]
+       \large Session Build-Up Summary}
+\author{}
+\date{\today}
+
+
+\begin{document}
+\maketitle
+
+
+% ---------------------------------------------------------------------
+\section{Project Goal}
+% ---------------------------------------------------------------------
+
+Build, incrementally, a self-contained Python simulation of spacecraft
+attitude dynamics and control following Markley and
+Crassidis~\cite{markley2014}. Each step in the session added a piece of
+physics or refactored the code for clarity. The final product is two
+deliverables --- a working simulation in Python and a companion
+LaTeX summary of the underlying physics --- plus an automated smoke test.
+
+
+% ---------------------------------------------------------------------
+\section{System Overview}
+% ---------------------------------------------------------------------
+
+The final simulation models a rigid spacecraft with the following
+components:
+
+\begin{itemize}\setlength{\itemsep}{2pt}
+  \item Quaternion-feedback PD attitude controller (scalar-last convention).
+  \item Four reaction wheels in a NASA-standard pyramid configuration.
+  \item Magnetic torquers performing wheel momentum unloading via a
+        cross-product (``\(B\)-dot--style'') control law.
+  \item A propellant-slosh disturbance modelled as a forced second-order
+        ODE on a 3-D torque state.
+  \item A 3-2-1 (Z-Y-X) Euler-angle interface for human-readable initial
+        conditions and post-processing.
+\end{itemize}
+
+\noindent The integrator is \texttt{scipy.integrate.solve\_ivp} (adaptive
+RK45 by default), and the closed-loop is treated as continuous-time --- the
+PD, magnetorquer, and wheel-allocation laws are evaluated at every solver
+step rather than held with zero-order hold.
+
+
+% ---------------------------------------------------------------------
+\section{Modelling Components}
+% ---------------------------------------------------------------------
+
+\subsection{Quaternion Kinematics (Scalar-Last)}
+
+Using \(\bm{q}=[\bm{q}_v;\,q_4]\), the body-to-inertial quaternion satisfies
+\begin{equation}
+\dot{\bm{q}} = \tfrac{1}{2}\,\bm{\Omega}(\bm{\omega})\,\bm{q}
+\;=\;
+\begin{bmatrix}
+ \tfrac{1}{2}\bigl(q_4\,\bm{\omega} - \bm{\omega}\times\bm{q}_v\bigr) \\
+-\tfrac{1}{2}\,\bm{\omega}^{\!\top}\bm{q}_v
+\end{bmatrix},
+\tag{M\&C Eq.~2.88}
+\end{equation}
+and the quaternion product follows
+\(\bm{A}(\bm{q}\otimes\bm{p}) = \bm{A}(\bm{q})\bm{A}(\bm{p})\)
+(M\&C~Eq.~2.82b).
+
+\subsection{Rigid-Body Dynamics with Reaction Wheels}
+
+Euler's equation with internal angular momentum
+\(\bm{h}_w^{\,b} = \bm{W}\bm{h}_w\) is
+\begin{equation}
+\bm{J}\,\dot{\bm{\omega}}
+\;=\;
+\bm{u}_{\text{body}}
+\;-\;
+\bm{\omega}\times(\bm{J}\bm{\omega} + \bm{h}_w^{\,b}),
+\tag{M\&C Sec.~7.2}
+\end{equation}
+where the inertia tensor uses the sign convention of M\&C~Eq.~3.13.
+Wheel torque commands integrate the wheel-momentum law
+\(\dot{\bm{h}}_w = \bm{\tau}_w\).
+
+\subsection{Reaction-Wheel Allocation}
+
+A four-wheel NASA pyramid with cant angle \(\beta = \arccos(1/\sqrt{3})
+\approx 54.74^\circ\) gives equal projection of each wheel onto the body
+axes. A desired body torque is allocated by the minimum-norm pseudoinverse:
+\begin{equation}
+\bm{\tau}_w \;=\; -\bm{W}^{+}\,\bm{u}_{\text{cmd}},
+\qquad
+\bm{W}^{+} = \bm{W}^{\!\top}(\bm{W}\bm{W}^{\!\top})^{-1}.
+\end{equation}
+
+\subsection{Quaternion-Feedback PD Controller}
+
+With error quaternion \(\delta\bm{q} = \bm{q}_{\text{des}}^{-1}\otimes\bm{q}\),
+the controller (M\&C~Sec.~7.4) is
+\begin{equation}
+\bm{u}_{\text{cmd}} \;=\;
+\operatorname{sat}_{u_{\max}}\!\Bigl(
+ -K_p\,\operatorname{sign}(\delta q_4)\,\delta\bm{q}_v
+ \;-\; K_d\,\bm{\omega}
+\Bigr).
+\end{equation}
+The \(\operatorname{sign}(\delta q_4)\) factor selects the shortest rotation
+and prevents the well-known \emph{unwinding} phenomenon. Each component is
+clipped to \([-u_{\max},+u_{\max}]\).
+
+\subsection{Magnetic Momentum Unloading}
+
+The cross-product (``\(B\)-dot--style'') law from M\&C~Sec.~7.5
+\begin{equation}
+\bm{m} \;=\; \operatorname{sat}_{m_{\max}}\!\biggl(
+\frac{K_{\text{dump}}}{\|\bm{B}\|^{2}}\,
+\bm{h}_w^{\,b}\times\bm{B}\biggr),
+\quad
+\bm{\tau}_{\text{mag}} \;=\; \bm{m}\times\bm{B},
+\end{equation}
+applies a damping torque to the component of \(\bm{h}_w^{\,b}\)
+perpendicular to \(\bm{B}\). Orbital variation of \(\bm{B}\) sweeps the
+unloadable subspace through all three body axes over one orbit. The toy
+geomagnetic field is an inclined rotating dipole of magnitude
+\(\sim 30~\mu\mathrm{T}\) at 90-min LEO period.
+
+\subsection{Propellant Slosh Model}
+
+Slosh torque \(\bm{T}_s \in \mathbb{R}^{3}\) is governed by
+\begin{equation}
+\ddot{\bm{T}}_s \;=\;
+ -A_s(t)\,\bm{\omega}
+ \;-\; B_s(t)\,\dot{\bm{\omega}}
+ \;-\; C_s(t)\,\dot{\bm{T}}_s
+ \;-\; K_s(t)\,\bm{T}_s,
+\label{eq:slosh}
+\end{equation}
+with each scalar coefficient time-varying as
+\begin{equation}
+f(t) \;=\; f_{\text{nom}} + f_{\text{amp}}\sin(\omega_f\,t),
+\qquad f \in \{A_s,B_s,C_s,K_s\}.
+\end{equation}
+The constraint \(f_{\text{nom}} > |f_{\text{amp}}|\) keeps \(K_s, C_s\)
+positive (negative stiffness or damping would be unphysical). \(\bm{T}_s\)
+enters Euler's equation as an additional external torque on the body.
+
+\textbf{No algebraic loop.} \(\dot{\bm{\omega}}\) depends on \(\bm{T}_s\) (a
+\emph{state}, not on \(\ddot{\bm{T}}_s\)), and \(\ddot{\bm{T}}_s\) consumes
+the just-computed \(\dot{\bm{\omega}}\). The RHS is fully explicit.
+
+\subsection{Coupled Equations of Motion}
+
+The complete state is
+\(\bm{x} = [\bm{q};\bm{\omega};\bm{h}_w;\bm{T}_s;\dot{\bm{T}}_s]
+        \in \mathbb{R}^{13+n_w}\),
+governed by
+\begin{align}
+\dot{\bm{q}}        &= \tfrac{1}{2}\,\bm{\Omega}(\bm{\omega})\,\bm{q}, \\
+\bm{J}\,\dot{\bm{\omega}} &= \bm{u}_{\text{body}}
+                            - \bm{\omega}\times(\bm{J}\bm{\omega}+\bm{W}\bm{h}_w), \\
+\dot{\bm{h}}_w      &= \bm{\tau}_w, \\
+\ddot{\bm{T}}_s     &= -A_s\bm{\omega} - B_s\dot{\bm{\omega}}
+                       - C_s\dot{\bm{T}}_s - K_s\bm{T}_s,
+\end{align}
+with
+\(\bm{u}_{\text{body}} = -\bm{W}\bm{\tau}_w + \bm{m}\times\bm{B} + \bm{T}_s\).
+
+
+% ---------------------------------------------------------------------
+\section{Code Architecture Evolution}
+% ---------------------------------------------------------------------
+
+The simulation was built incrementally; each step is reproducible from
+the conversation log.
+
+\begin{enumerate}\setlength{\itemsep}{4pt}
+  \item \textbf{Baseline rigid body + PD controller.}
+        A single-file implementation of Euler's equation with a quaternion
+        PD law and a hand-written fourth-order Runge--Kutta integrator.
+  \item \textbf{Euler-angle initial conditions.}
+        Helper \texttt{euler321\_to\_quat()} converts a roll-pitch-yaw
+        triple to a scalar-last quaternion (M\&C App.~B.96).
+  \item \textbf{Full 3$\times$3 inertia tensor.}
+        Replaced the diagonal default with off-diagonal products of inertia
+        and added symmetry / positive-definiteness assertions.
+  \item \textbf{Reaction-wheel dynamics.}
+        Added the four-wheel NASA pyramid configuration matrix \(\bm{W}\),
+        pseudoinverse allocation, and the wheel-momentum gyroscopic term in
+        Euler's equation.
+  \item \textbf{Magnetic momentum unloading.}
+        Added a toy LEO B-field, the cross-product unloading law, and per-
+        axis dipole saturation. Also introduced PD torque saturation
+        \(u_{\max}\).
+  \item \textbf{Propellant slosh disturbance.}
+        Added the second-order slosh ODE driven by \((\bm{\omega},
+        \dot{\bm{\omega}})\), with time-varying scalar coefficients
+        (DC~+~sine).
+  \item \textbf{Variable rename.}
+        Renamed \(\Gamma_s \to T_s\) throughout the code and plot labels
+        for consistency with the user's preferred notation.
+  \item \textbf{Toggles.}
+        Added independent on/off switches for slosh, magnetorquer, and
+        reaction wheels. With wheels disabled the PD output drives the body
+        directly as an ideal torque actuator.
+  \item \textbf{Migration to \texttt{solve\_ivp}.}
+        Replaced the hand-rolled RK4 loop with
+        \texttt{scipy.integrate.solve\_ivp} (adaptive RK45). Quaternion
+        re-normalisation moved from per-step to post-processing.
+  \item \textbf{Merge and clean-up.}
+        Consolidated the two intermediate files into a single
+        \texttt{rigid\_body\_pd.py}. Removed all RK4-specific code paths.
+  \item \textbf{Dataclass + presets refactor (v2).}
+        Centralised every spacecraft parameter, gain, initial condition,
+        time setting, and toggle into a single \texttt{SimConfig} dataclass
+        at the top of the file. Added two named preset factories,
+        \texttt{mc\_example\_71()} and \texttt{mc\_example\_72()}, matching
+        the worked examples in M\&C Sec.~7.
+\end{enumerate}
+
+
+% ---------------------------------------------------------------------
+\section{Final Architecture (v2)}
+% ---------------------------------------------------------------------
+
+\subsection{The \texttt{SimConfig} Dataclass}
+
+All scenario knobs live in one place:
+
+\begin{lstlisting}
+@dataclass
+class SimConfig:
+    """All satellite parameters, gains, ICs, time, and toggles."""
+    # Inertia (M&C Eq. 3.13), kg.m^2
+    Ixx: float = 6400.0;  Iyy: float = 4730.0;  Izz: float = 8160.0
+    Ixy: float = 76.4;    Ixz: float = 25.6;    Iyz: float = 40.0
+    # Wheel geometry
+    wheel_tilt_deg: float = 54.7356      # 4-wheel NASA pyramid
+    # PD gains and saturation
+    Kp: float = 10.0;   Kd: float = 150.0;   u_max: float = 1000.0
+    # Magnetorquer
+    K_dump: float = 1.0;  m_max: float = 500.0
+    # Slosh:  f(t) = nom + amp*sin(omega*t)
+    slosh_params: dict = field(default_factory=lambda: {
+        'A': {'nom': 0.005, 'amp': 0.0, 'omega': 0.05},
+        'B': {'nom': 0.020, 'amp': 0.0, 'omega': 0.05},
+        'C': {'nom': 0.023, 'amp': 0.0, 'omega': 0.05},
+        'K': {'nom': 0.008, 'amp': 0.0, 'omega': 0.05},
+    })
+    # Initial conditions (scalar-last)
+    q0:    np.ndarray = field(default_factory=lambda:
+        (math.sqrt(2)/2) * np.array([1.0, 0.0, 0.0, 1.0]))
+    w0:    np.ndarray = field(default_factory=lambda:
+        np.array([0.01, 0.01, 0.01]))
+    q_des: np.ndarray = field(default_factory=lambda:
+        np.array([0.0, 0.0, 0.0, 1.0]))
+    Ts0:   np.ndarray = field(default_factory=lambda: np.zeros(3))
+    Tsd0:  np.ndarray = field(default_factory=lambda: np.zeros(3))
+    # Time
+    t_end: float = 20*60.0;  dt_eval: float = 0.05
+    # Toggles
+    enable_slosh:        bool = False
+    enable_magnetorquer: bool = False
+    enable_wheels:       bool = True
+    # Solver
+    method: str = 'RK45';  rtol: float = 1e-8
+    atol: float = 1e-10;   max_step: float = 0.5
+\end{lstlisting}
+
+\subsection{Named Presets}
+
+\begin{lstlisting}
+def mc_example_71() -> SimConfig:
+    """Large spacecraft, diagonal J, fast initial tumble."""
+    cfg = SimConfig()
+    cfg.Ixx, cfg.Iyy, cfg.Izz = 10000.0, 9000.0, 12000.0
+    cfg.Ixy = cfg.Ixz = cfg.Iyz = 0.0
+    cfg.Kp, cfg.Kd = 50.0, 500.0
+    cfg.u_max = 100.0
+    q = np.array([0.6853, 0.6953, 0.1531, 0.1531])
+    cfg.q0 = q / np.linalg.norm(q)
+    cfg.w0 = np.array([0.53, 0.53, 0.053])
+    cfg.t_end = 300.0
+    return cfg
+
+def mc_example_72() -> SimConfig:
+    """Smaller spacecraft with products of inertia; gentle IC."""
+    return SimConfig()    # SimConfig() defaults already match Example 7.2
+\end{lstlisting}
+
+\subsection{Usage Pattern}
+
+\begin{lstlisting}
+cfg = mc_example_72()
+cfg.enable_slosh = True            # in-place tweak
+cfg.Kp, cfg.Kd = 15.0, 200.0
+results = simulate(cfg)            # one entry point
+plot_results(*results)
+plot_euler_and_rates(results[0], results[1], results[3])
+plt.show()
+\end{lstlisting}
+
+
+% ---------------------------------------------------------------------
+\section{Validation: Automated Smoke Test}
+% ---------------------------------------------------------------------
+
+A separate file \texttt{test\_rigid\_body\_pd\_v2.py} exercises the
+simulation under every toggle combination using the non-interactive
+\texttt{Agg} matplotlib backend. All eight test cases pass.
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+\textbf{Test} & \textbf{Result} \\
+\midrule
+Euler $\leftrightarrow$ quaternion roundtrip (4 angle triples) & Pass \\
+Example 7.1 preset, wheels only                                 & Pass \\
+Example 7.2 preset, wheels only                                 & Pass \\
+Example 7.2 full stack (slosh + mag + wheels)                   & Pass \\
+Example 7.2 with wheels OFF (ideal actuator)                    & Pass \\
+Example 7.2 with all subsystems OFF                             & Pass \\
+Example 7.2 with overridden gains (in-place mutation)           & Pass \\
+Plot functions (both figures)                                   & Pass \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Per-trajectory invariants checked at every output sample:
+\begin{itemize}\setlength{\itemsep}{1pt}
+  \item Output tuple length = 11; all array shapes match the expected
+        \((N,4)\), \((N,3)\), \((N,n_w)\).
+  \item No NaNs in any state trajectory.
+  \item Unit-norm quaternion preserved to machine precision
+        (\(\max\bigl|\,\|\bm{q}\|-1\,\bigr| = 2.22\times10^{-16}\)).
+  \item \(|\bm{\omega}|\) monotonically non-increasing in every settling case.
+  \item When a toggle is OFF, the corresponding telemetry stays at
+        exactly zero (\(\bm{h}_w\), \(\bm{\tau}_w\), \(\bm{m}\),
+        \(\bm{\tau}_{\text{mag}}\), \(\bm{T}_s\)).
+\end{itemize}
+
+
+% ---------------------------------------------------------------------
+\section{Companion LaTeX Physics Summary}
+% ---------------------------------------------------------------------
+
+A separate file \texttt{attitude\_dynamics\_model.tex} was produced for
+direct import into the project's Overleaf write-up. It contains a
+self-contained section with every equation above plus extended
+discussion, fully cross-referenced via \texttt{\textbackslash label}.
+The \texttt{\textbackslash cite\{markley2014\}} entry should resolve to
+Markley and Crassidis using the BibTeX stanza included at the top of that
+file.
+
+
+% ---------------------------------------------------------------------
+\section{Proposed Extension: NARX Slosh Surrogate}
+% ---------------------------------------------------------------------
+
+A design (no code) was discussed for replacing the analytical slosh ODE
+\eqref{eq:slosh} with a learned Nonlinear Autoregressive Network with
+eXogenous Inputs (NARX). The map to learn is
+\begin{equation}
+\hat{T}_s(k) \;=\; f_\theta\bigl(
+  T_s(k{-}1),\dots,T_s(k{-}n_y),\;
+  \omega(k),\dots,\omega(k{-}n_u),\;
+  \dot\omega(k),\dots,\dot\omega(k{-}n_u)
+\bigr),
+\end{equation}
+optionally extended to a \emph{parametric} surrogate by also feeding the
+four slosh coefficients \((A_s, B_s, C_s, K_s)\). The plan, in order:
+
+\begin{enumerate}\setlength{\itemsep}{2pt}
+  \item Add a helper \texttt{reconstruct\_w\_dot()} that recomputes
+        \(\dot{\bm{\omega}}\) exactly from the saved \texttt{simulate()}
+        outputs (no finite differences).
+  \item Implement \texttt{sample\_random\_config(rng)} that draws
+        \texttt{SimConfig} instances with randomised initial conditions,
+        gains, inertia perturbations, and (optionally) slosh coefficients.
+  \item Generate 100--500 trajectories, each $\sim$600\,s, downsampled to
+        \(\Delta t \approx 0.5\,\mathrm{s}\) and stacked across all three
+        body axes (the slosh dynamics are axis-decoupled, so one scalar
+        NARX trained on stacked per-axis data is the right architecture).
+  \item Build sliding-window features with lag orders
+        \(n_y \approx n_u \approx 10\)--\(20\) samples.
+  \item Train a small MLP (e.g. 64-64 \texttt{tanh}) with
+        \texttt{sklearn.neural\_network.MLPRegressor} as a baseline, then
+        promote to PyTorch if needed.
+  \item Validate in two modes:
+        \emph{one-step prediction} (teacher-forced lags) for training-loss
+        sanity, and \emph{free-running rollout} (model feeds its own past
+        predictions) for honest dynamic accuracy.
+  \item Split by \emph{whole trajectory} (70/15/15) to avoid leakage from
+        adjacent correlated samples within one simulation.
+  \item Optional integration: add \texttt{cfg.use\_narx\_slosh = True}
+        and \texttt{cfg.narx\_model = trained\_model} to the dataclass,
+        wire it into \texttt{dynamics\_rhs}, and compare closed-loop
+        traces against the analytical slosh ground truth on held-out
+        initial conditions.
+\end{enumerate}
+
+
+% ---------------------------------------------------------------------
+\section{Deliverables}
+% ---------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{File} & \textbf{Purpose} \\
+\midrule
+\texttt{rigid\_body\_pd.py}            & Merged simulation, \texttt{solve\_ivp}-based \\
+\texttt{rigid\_body\_pd\_v2.py}        & Dataclass + presets refactor (recommended) \\
+\texttt{test\_rigid\_body\_pd\_v2.py}  & Smoke test (8 cases, all pass) \\
+\texttt{attitude\_dynamics\_model.tex} & Physics section for Overleaf \\
+\texttt{session\_summary.tex}          & This document \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+
+% ---------------------------------------------------------------------
+\section{Conventions Used Throughout}
+% ---------------------------------------------------------------------
+
+\begin{itemize}\setlength{\itemsep}{1pt}
+  \item \textbf{Quaternion:} scalar-last, \(\bm{q}=[q_1, q_2, q_3, q_4]\)
+        with \(q_4\) the scalar part.
+  \item \textbf{Euler sequence:} 3-2-1 (Z-Y-X, yaw-pitch-roll) for human
+        I/O; quaternions everywhere internally.
+  \item \textbf{Inertia sign:} off-diagonal entries are stored as positive
+        products of inertia; the negative signs live in the \(\bm{J}\)
+        builder (M\&C Eq.~3.13).
+  \item \textbf{Frames:} body frame throughout; \(\bm{B}\) and
+        \(\bm{h}_w^{\,b}\) are body-frame projections.
+  \item \textbf{Slosh torque symbol:} \(\bm{T}_s\) (code: \texttt{Ts}),
+        with rate \(\dot{\bm{T}}_s\) (\texttt{Ts\_dot}). Renamed from the
+        original \(\Gamma_s\).
+\end{itemize}
+
+
+% ---------------------------------------------------------------------
+\begin{thebibliography}{1}
+% ---------------------------------------------------------------------
+
+\bibitem{markley2014}
+F.~L.~Markley and J.~L.~Crassidis,
+\emph{Fundamentals of Spacecraft Attitude Determination and Control},
+Space Technology Library, Vol.~33,
+Springer, New York, NY, 2014.
+\href{https://doi.org/10.1007/978-1-4939-0802-8}{doi:10.1007/978-1-4939-0802-8}.
+
+\end{thebibliography}
+
+\end{document}
