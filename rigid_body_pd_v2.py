@@ -1,4 +1,4 @@
-"""
+""""
 Rigid-body attitude dynamics with quaternion PD control, reaction wheels,
 magnetic momentum dumping, and a propellant-slosh disturbance torque.
 
@@ -10,7 +10,7 @@ worked examples in Markley & Crassidis (Examples 7.1 and 7.2).
 Integrator: scipy.integrate.solve_ivp (adaptive RK45 by default).
 Convention: SCALAR-LAST quaternion  q = [q1, q2, q3, q4],  q4 = scalar.
 
-Reference:
+Reference:X 
     Markley, F.L. and Crassidis, J.L., "Fundamentals of Spacecraft Attitude
     Determination and Control" (Springer, 2014).
         - Eq. 2.82b  : quaternion product, scalar-last
