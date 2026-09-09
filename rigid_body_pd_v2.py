@@ -1,4 +1,4 @@
-""""
+"""
 Rigid-body attitude dynamics with quaternion PD control, reaction wheels,
 magnetic momentum dumping, and a propellant-slosh disturbance torque.
 
@@ -10,7 +10,7 @@ worked examples in Markley & Crassidis (Examples 7.1 and 7.2).
 Integrator: scipy.integrate.solve_ivp (adaptive RK45 by default).
 Convention: SCALAR-LAST quaternion  q = [q1, q2, q3, q4],  q4 = scalar.
 
-Reference:X 
+Reference:
     Markley, F.L. and Crassidis, J.L., "Fundamentals of Spacecraft Attitude
     Determination and Control" (Springer, 2014).
         - Eq. 2.82b  : quaternion product, scalar-last
@@ -55,12 +55,24 @@ class SimConfig:
     K_dump: float = 1.0      # 1/s,    magnetic momentum-dump gain
     m_max:  float = 500.0    # A·m^2,  per-axis magnetorquer dipole saturation
 
-    # ---- Slosh model:  f(t) = nom + amp*sin(omega*t) ----
+    # ---- Slosh model selector: 'bourdelle' (default) or 'testing' ----
+#    slosh_model: str = 'bourdelle'
+    slosh_model: str = 'testing'
+
+
+    # ---- Slosh model (bourdelle):  f(t) = nom + amp*sin(omega*t) ----
     slosh_params: dict = field(default_factory=lambda: {
         'A': {'nom': 0.005, 'amp': 0.0, 'omega': 0.05},
         'B': {'nom': 0.020, 'amp': 0.0, 'omega': 0.05},
         'C': {'nom': 0.023, 'amp': 0.0, 'omega': 0.05},
         'K': {'nom': 0.008, 'amp': 0.0, 'omega': 0.05},
+    })
+
+    # ---- Slosh model (testing): rate-dependent stiffness/damping ----
+    slosh_testing_params: dict = field(default_factory=lambda: {
+        'omega_n':   0.08944,    # rad/s, sloshing-mode natural frequency
+        'zeta':      0.1286,     # sloshing-mode damping ratio
+        'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s)
     })
 
     # ---- Initial conditions ----
@@ -244,7 +256,7 @@ def slosh_coefficient(t, nom, amp, omega):
     return nom + amp * np.sin(omega * t)
 
 
-def slosh_dynamics(omega_body, omega_dot, Ts, Ts_dot, t, slosh_params):
+def slosh_dynamics_bourdelle(omega_body, omega_dot, Ts, Ts_dot, t, slosh_params):
     """
     Second-order propellant-slosh model driven by spacecraft body motion:
         Ts_ddot = -A_s(t)*omega - B_s(t)*omega_dot
@@ -257,6 +269,28 @@ def slosh_dynamics(omega_body, omega_dot, Ts, Ts_dot, t, slosh_params):
     C = slosh_coefficient(t, **slosh_params['C'])
     K = slosh_coefficient(t, **slosh_params['K'])
     return -A * omega_body - B * omega_dot - C * Ts_dot - K * Ts
+
+
+def slosh_dynamics_testing(omega_body, omega_dot, Ts, Ts_dot, testing_params):
+    """
+    Alternate second-order propellant-slosh model with rate-dependent
+    stiffness/damping saturation:
+        Ts_ddot = -omega_n^2 * Ts
+                  - 2*zeta*omega_n / (1 + (Omega/Omega_max)^2) * Ts_dot
+                  + omega_n^2 * (1 + (Omega/Omega_max)^2) * Omega_dot
+    where Omega = omega_body (per axis) and Omega_dot = omega_dot (per axis).
+    `testing_params` holds {'omega_n':..., 'zeta':..., 'omega_max':...}.
+    """
+    omega_n   = testing_params['omega_n']
+    zeta      = testing_params['zeta']
+    omega_max = testing_params['omega_max']
+
+    K = omega_n ** 2
+    ratio_sq = (omega_body / omega_max) ** 2
+
+    return (-K * Ts
+            - (2.0 * zeta * omega_n / (1.0 + ratio_sq)) * Ts_dot
+            + K * (1.0 + ratio_sq) * omega_dot)
 
 
 # =====================================================================
@@ -354,8 +388,13 @@ def dynamics_rhs(t, y, params):
 
     # 7) Slosh second-order ODE (uses w_dot just computed)
     if params['enable_slosh']:
-        Ts_dot  = Tsd
-        Tsd_dot = slosh_dynamics(w, w_dot, Ts, Tsd, t, params['slosh_params'])
+        Ts_dot = Tsd
+        if params['slosh_model'] == 'testing':
+            Tsd_dot = slosh_dynamics_testing(w, w_dot, Ts, Tsd,
+                                             params['slosh_testing_params'])
+        else:
+            Tsd_dot = slosh_dynamics_bourdelle(w, w_dot, Ts, Tsd, t,
+                                               params['slosh_params'])
     else:
         Ts_dot  = np.zeros(3)
         Tsd_dot = np.zeros(3)
@@ -412,7 +451,9 @@ def simulate(cfg: SimConfig = None):
         'J': J, 'W': W, 'W_pinv': W_pinv, 'n_w': n_w,
         'Kp': cfg.Kp, 'Kd': cfg.Kd, 'u_max': cfg.u_max, 'q_des': cfg.q_des,
         'K_dump': cfg.K_dump, 'm_max': cfg.m_max,
+        'slosh_model': cfg.slosh_model,
         'slosh_params': cfg.slosh_params,
+        'slosh_testing_params': cfg.slosh_testing_params,
         'enable_slosh': cfg.enable_slosh,
         'enable_magnetorquer': cfg.enable_magnetorquer,
         'enable_wheels': cfg.enable_wheels,

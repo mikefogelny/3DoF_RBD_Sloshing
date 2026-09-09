@@ -136,6 +136,13 @@ def main():
     ok, _ = run_case("Example 7.2 (full stack)", cfg)
     all_ok &= ok
 
+    # Preset 7.2 + slosh with the 'testing' model instead of 'bourdelle'
+    cfg = mc_example_72()
+    cfg.enable_slosh = True
+    cfg.slosh_model = 'testing'
+    ok, _ = run_case("Example 7.2 (slosh_dynamics_testing)", cfg)
+    all_ok &= ok
+
     # Preset 7.2 with wheels OFF (ideal torque actuator)
     cfg = mc_example_72()
     cfg.enable_wheels = False
