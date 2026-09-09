@@ -602,6 +602,62 @@ def plot_euler_and_rates(t, q_hist, w_hist):
 
 
 # =====================================================================
+# Export to MATLAB (.mat)
+# =====================================================================
+
+def export_to_mat(results, cfg, filepath="sim_results.mat"):
+    """
+    Export simulation telemetry to a MATLAB .mat file.
+
+    Saves a single (nt, 19) matrix `data`: time + 18 data columns
+    [angles(3), omega(3), omega_dot(3), control_torque(3), Ts(3), Ts_dot(3)],
+    plus a `labels` cell array naming each column.
+
+    control_torque = u_act + tau_mag (the actuator + magnetorquer torque
+    actually applied to the body), excluding the slosh disturbance torque Ts
+    (see dynamics_rhs, u_body = u_act + tau_mag + slosh_torque).
+
+    omega_dot and Ts_dot are not stored by `simulate()`, so they are
+    reconstructed here via numerical differentiation (np.gradient) of the
+    saved omega/Ts histories rather than by re-running the RHS.
+    """
+    from scipy.io import savemat
+
+    (t, q_hist, dq_hist, w_hist, u_hist,
+     hw_hist, tauw_hist, m_hist, tmag_hist, B_hist, Ts_hist) = results
+
+    N = len(t)
+    angles = np.array([quat_to_euler321(q_hist[k]) for k in range(N)])
+    omega_dot = np.gradient(w_hist, t, axis=0)
+    Ts_dot = np.gradient(Ts_hist, t, axis=0)
+
+    # Reconstruct u_act = -W @ tau_w (wheels on) or u_cmd (wheels off),
+    # matching the actuator branch in dynamics_rhs.
+    beta = np.deg2rad(cfg.wheel_tilt_deg)
+    cb, sb = np.cos(beta), np.sin(beta)
+    W = np.array([[ sb,   0.0, -sb,   0.0],
+                  [ 0.0,  sb,   0.0, -sb ],
+                  [ cb,   cb,   cb,   cb ]])
+    if cfg.enable_wheels:
+        u_act = -(W @ tauw_hist.T).T
+    else:
+        u_act = u_hist
+    control_torque = u_act + tmag_hist
+
+    data = np.column_stack([t, angles, w_hist, omega_dot, control_torque, Ts_hist, Ts_dot])
+    labels = ["t",
+              "roll", "pitch", "yaw",
+              "wx", "wy", "wz",
+              "wx_dot", "wy_dot", "wz_dot",
+              "ux", "uy", "uz",
+              "Tsx", "Tsy", "Tsz",
+              "Tsx_dot", "Tsy_dot", "Tsz_dot"]
+
+    savemat(filepath, {"data": data, "labels": labels})
+    print(f"Saved {N} samples x {data.shape[1]} columns to {filepath}")
+
+
+# =====================================================================
 # Entry point
 # =====================================================================
 
