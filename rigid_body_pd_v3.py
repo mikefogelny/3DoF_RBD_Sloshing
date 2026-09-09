@@ -7,6 +7,11 @@ conditions, time settings, and toggles live in a single SimConfig dataclass
 at the top of the file.  Named preset factory functions are provided for the
 worked examples in Markley & Crassidis (Examples 7.1 and 7.2).
 
+Version 3 — adds multi-trajectory batch support: run_batch() reuses a single
+base SimConfig (fixed inertia, wheel geometry, gains, slosh model) across a
+list of scenario overrides (q0 / q_des / w0 per trajectory), and
+export_batch_to_mat() exports all trajectories to one MATLAB .mat file.
+
 Integrator: scipy.integrate.solve_ivp (adaptive RK45 by default).
 Convention: SCALAR-LAST quaternion  q = [q1, q2, q3, q4],  q4 = scalar.
 
@@ -22,6 +27,7 @@ Reference:
         - App. B.96  : 3-2-1 Euler-angle <-> quaternion conversion
 """
 
+import copy
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -605,13 +611,13 @@ def plot_euler_and_rates(t, q_hist, w_hist):
 # Export to MATLAB (.mat)
 # =====================================================================
 
-def export_to_mat(results, cfg, filepath="sim_results.mat"):
+def _build_trajectory_columns(results, cfg):
     """
-    Export simulation telemetry to a MATLAB .mat file.
+    Build the (nt, 19) [time + 18 data-column] matrix and column labels for
+    one trajectory's `results` tuple (as returned by `simulate()`).
 
-    Saves a single (nt, 19) matrix `data`: time + 18 data columns
-    [angles(3), omega(3), omega_dot(3), control_torque(3), Ts(3), Ts_dot(3)],
-    plus a `labels` cell array naming each column.
+    Columns: t, angles(3), omega(3), omega_dot(3), control_torque(3),
+    Ts(3), Ts_dot(3).
 
     control_torque = u_act + tau_mag (the actuator + magnetorquer torque
     actually applied to the body), excluding the slosh disturbance torque Ts
@@ -621,8 +627,6 @@ def export_to_mat(results, cfg, filepath="sim_results.mat"):
     reconstructed here via numerical differentiation (np.gradient) of the
     saved omega/Ts histories rather than by re-running the RHS.
     """
-    from scipy.io import savemat
-
     (t, q_hist, dq_hist, w_hist, u_hist,
      hw_hist, tauw_hist, m_hist, tmag_hist, B_hist, Ts_hist) = results
 
@@ -652,9 +656,88 @@ def export_to_mat(results, cfg, filepath="sim_results.mat"):
               "ux", "uy", "uz",
               "Tsx", "Tsy", "Tsz",
               "Tsx_dot", "Tsy_dot", "Tsz_dot"]
+    return data, labels
 
+
+def export_to_mat(results, cfg, filepath="sim_results.mat"):
+    """
+    Export a single trajectory's telemetry to a MATLAB .mat file.
+    See `_build_trajectory_columns` for the column layout.
+    """
+    from scipy.io import savemat
+
+    data, labels = _build_trajectory_columns(results, cfg)
     savemat(filepath, {"data": data, "labels": labels})
-    print(f"Saved {N} samples x {data.shape[1]} columns to {filepath}")
+    print(f"Saved {data.shape[0]} samples x {data.shape[1]} columns to {filepath}")
+
+
+# =====================================================================
+# Multi-trajectory batch support
+# =====================================================================
+
+def run_batch(base_cfg: SimConfig, scenarios: list) -> list:
+    """
+    Run one simulation per scenario, reusing `base_cfg` (fixed inertia,
+    wheel geometry, gains, slosh model) for everything except the
+    per-trajectory overrides.
+
+    Parameters
+    ----------
+    base_cfg : SimConfig
+        The shared satellite/controller configuration.
+    scenarios : list of dict
+        Each dict may set 'q0', 'q_des', and/or 'w0' (numpy arrays) to
+        override the corresponding field on a fresh copy of base_cfg.
+
+    Returns
+    -------
+    list of results tuples, one per scenario, in the same order.
+    """
+    all_results = []
+    for i, sc in enumerate(scenarios):
+        cfg = copy.deepcopy(base_cfg)
+        if 'q0' in sc:
+            cfg.q0 = sc['q0']
+        if 'q_des' in sc:
+            cfg.q_des = sc['q_des']
+        if 'w0' in sc:
+            cfg.w0 = sc['w0']
+        print(f"--- Trajectory {i + 1}/{len(scenarios)} ---")
+        all_results.append(simulate(cfg))
+    return all_results
+
+
+def export_batch_to_mat(batch_results, scenarios, cfg, filepath="sim_results_batch.mat"):
+    """
+    Export all trajectories from `run_batch` to a single MATLAB .mat file.
+
+    Saves `trajectories`: a 1xN cell array (N = number of scenarios), each
+    cell holding a struct with fields:
+        data    - (nt, 19) matrix, see `_build_trajectory_columns`
+        labels  - 1x19 cell array of column names
+        q0_deg  - [roll, pitch, yaw] initial Euler angles (deg)
+        qdes_deg- [roll, pitch, yaw] desired Euler angles (deg)
+    """
+    from scipy.io import savemat
+
+    traj_structs = []
+    for results, sc in zip(batch_results, scenarios):
+        data, labels = _build_trajectory_columns(results, cfg)
+        q0_deg    = np.rad2deg(quat_to_euler321(sc.get('q0', cfg.q0)))
+        qdes_deg  = np.rad2deg(quat_to_euler321(sc.get('q_des', cfg.q_des)))
+        traj_structs.append({
+            "data": data,
+            "labels": labels,
+            "q0_deg": q0_deg,
+            "qdes_deg": qdes_deg,
+        })
+
+    trajectories = np.empty((1, len(traj_structs)), dtype=object)
+    for i, ts in enumerate(traj_structs):
+        trajectories[0, i] = ts
+
+    savemat(filepath, {"trajectories": trajectories})
+    print(f"Saved {len(traj_structs)} trajectories to {filepath}")
 
 
 # =====================================================================
