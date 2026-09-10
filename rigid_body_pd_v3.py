@@ -811,32 +811,77 @@ def plot_euler_and_rates(t, q_hist, w_hist):
     plt.tight_layout()
 
 
-def plot_batch(batch_results, scenarios=None):
+def _scenario_start_target_deg(sc, cfg):
+    """
+    Return (q0_deg, qdes_deg) — human-readable [roll, pitch, yaw] degree
+    triples describing a scenario's start/target attitude.
+
+    Prefers explicit 'q0_deg'/'qdes_deg' entries in the scenario dict (the
+    EXACT degrees the caller originally specified) over round-tripping the
+    quaternion through quat_to_euler321(). That round trip is lossy at
+    gimbal lock (pitch = +-90 deg): infinitely many (roll, pitch, yaw)
+    triples map to the same quaternion there, so quat_to_euler321() can
+    report a technically-equivalent but visually different triple (e.g.
+    [180, 90, 180] instead of the [0, 90, 0] that was actually requested).
+    Falls back to that round trip only when the scenario didn't record its
+    original degrees.
+    """
+    if 'q0_deg' in sc:
+        q0_deg = np.asarray(sc['q0_deg'], dtype=float)
+    else:
+        q0_deg = np.rad2deg(quat_to_euler321(sc.get('q0', cfg.q0)))
+
+    if 'qdes_deg' in sc:
+        qdes_deg = np.asarray(sc['qdes_deg'], dtype=float)
+    else:
+        qdes_deg = np.rad2deg(quat_to_euler321(sc.get('q_des', cfg.q_des)))
+
+    return q0_deg, qdes_deg
+
+
+def plot_batch(batch_results, scenarios=None, cfg=None):
     """
     Plot each trajectory from a `run_batch()` result in its own separate
-    figure window (Euler angles + body rates), labeled with its scenario
-    index and, if available, its start/target Euler angles.
+    set of figure windows, labeled with its scenario index and, if
+    available, its start/target Euler angles.
+
+    For each scenario this opens TWO figure windows:
+        - the 9-panel `plot_results` figure (quaternion, error quaternion,
+          body rate, control torque, wheel momentum/torque, magnetorquer
+          dipole/torque, slosh torque), and
+        - the 2-panel `plot_euler_and_rates` figure (Euler angles, body
+          rates in deg).
 
     Parameters
     ----------
     batch_results : list of results tuples, as returned by run_batch().
     scenarios : list of dict, optional
         The same scenario list passed to run_batch(); if given, each
-        figure's title includes that scenario's q0/q_des in degrees.
+        figure's title includes that scenario's start/target angles (see
+        `_scenario_start_target_deg` for how those degrees are obtained).
+    cfg : SimConfig, optional
+        The base_cfg used for the batch; only needed as a fallback source
+        of q0/q_des if a scenario doesn't override them.
     """
     for i, results in enumerate(batch_results):
-        t, q_hist, w_hist = results[0], results[1], results[3]
-        plot_euler_and_rates(t, q_hist, w_hist)
-        fig = plt.gcf()
         title = f"Scenario {i}"
         if scenarios is not None:
             sc = scenarios[i]
-            if 'q0' in sc:
-                title += f"  start={np.round(np.rad2deg(quat_to_euler321(sc['q0'])), 1)}"
-            if 'q_des' in sc:
-                title += f"  target={np.round(np.rad2deg(quat_to_euler321(sc['q_des'])), 1)}"
+            q0_deg, qdes_deg = _scenario_start_target_deg(sc, cfg or SimConfig())
+            title += f"  start={np.round(q0_deg, 1)}  target={np.round(qdes_deg, 1)}"
+
+        # 9-panel telemetry figure (states + controller outputs + slosh).
+        plot_results(*results)
+        fig = plt.gcf()
         fig.suptitle(title)
-        fig.canvas.manager.set_window_title(title)
+        fig.canvas.manager.set_window_title(title + " (telemetry)")
+
+        # 2-panel Euler-angle + body-rate figure.
+        t, q_hist, w_hist = results[0], results[1], results[3]
+        plot_euler_and_rates(t, q_hist, w_hist)
+        fig = plt.gcf()
+        fig.suptitle(title)
+        fig.canvas.manager.set_window_title(title + " (angles)")
 
 
 # =====================================================================
@@ -966,8 +1011,10 @@ def export_batch_to_mat(batch_results, scenarios, cfg, filepath="sim_results_bat
         # Record each scenario's actual start/target angles (in human-
         # readable degrees) alongside its data, so MATLAB-side code can
         # identify which trajectory is which without re-deriving it from q0.
-        q0_deg    = np.rad2deg(quat_to_euler321(sc.get('q0', cfg.q0)))
-        qdes_deg  = np.rad2deg(quat_to_euler321(sc.get('q_des', cfg.q_des)))
+        # See _scenario_start_target_deg for why this prefers the
+        # scenario's own recorded degrees over quat_to_euler321 (gimbal
+        # lock at pitch = +-90 deg makes that round trip lossy/ambiguous).
+        q0_deg, qdes_deg = _scenario_start_target_deg(sc, cfg)
         traj_structs.append({
             "data": data,
             "labels": labels,

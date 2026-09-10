@@ -25,28 +25,50 @@ from rigid_body_pd_v3 import (
 )
 
 
+def _scenario(start_deg, target_deg, w0=None):
+    """
+    Build one scenario dict, recording BOTH the quaternion (q0/q_des, what
+    run_batch/simulate actually use) and the original [roll, pitch, yaw]
+    degree triples (q0_deg/qdes_deg, what plot_batch/export_batch_to_mat
+    display).
+
+    Storing the degrees explicitly -- rather than recovering them later via
+    quat_to_euler321(q_des) -- avoids a gimbal-lock ambiguity: at pitch =
+    +-90 deg, infinitely many (roll, pitch, yaw) triples correspond to the
+    same quaternion, so round-tripping through quat_to_euler321 can report
+    a technically-equivalent but visually different triple (e.g.
+    [180, 90, 180] instead of the [0, 90, 0] actually requested here).
+    """
+    sc = {
+        'q0':      euler321_to_quat(*start_deg),
+        'q_des':   euler321_to_quat(*target_deg),
+        'q0_deg':  np.array(start_deg, dtype=float),
+        'qdes_deg': np.array(target_deg, dtype=float),
+    }
+    if w0 is not None:
+        sc['w0'] = w0
+    return sc
+
+
 def build_scenarios():
     """Return the list of 10 scenario dicts (q0/q_des, and w0 for #10)."""
-    zero = euler321_to_quat(0, 0, 0)
-
     scenarios = [
         # 1-3: single-axis
-        {'q0': zero, 'q_des': euler321_to_quat(90, 0, 0)},
-        {'q0': zero, 'q_des': euler321_to_quat(0, 90, 0)},
-        {'q0': zero, 'q_des': euler321_to_quat(0, 0, 90)},
+        _scenario((0, 0, 0), (90, 0, 0)),
+        _scenario((0, 0, 0), (0, 90, 0)),
+        _scenario((0, 0, 0), (0, 0, 90)),
         # 4-6: two-axis coupled
-        {'q0': zero, 'q_des': euler321_to_quat(90, 90, 0)},
-        {'q0': zero, 'q_des': euler321_to_quat(90, 0, 90)},
-        {'q0': zero, 'q_des': euler321_to_quat(0, 90, 90)},
+        _scenario((0, 0, 0), (90, 90, 0)),
+        _scenario((0, 0, 0), (90, 0, 90)),
+        _scenario((0, 0, 0), (0, 90, 90)),
         # 7: all three axes simultaneously
-        {'q0': zero, 'q_des': euler321_to_quat(90, 90, 90)},
+        _scenario((0, 0, 0), (90, 90, 90)),
         # 8: same magnitude, opposite direction
-        {'q0': zero, 'q_des': euler321_to_quat(-90, -90, -90)},
+        _scenario((0, 0, 0), (-90, -90, -90)),
         # 9: large single-axis maneuver near 180 deg
-        {'q0': zero, 'q_des': euler321_to_quat(180, 0, 0)},
+        _scenario((0, 0, 0), (180, 0, 0)),
         # 10: small-angle target, nonzero initial tumble
-        {'q0': zero, 'q_des': euler321_to_quat(10, 10, 10),
-         'w0': np.array([0.05, -0.03, 0.02])},
+        _scenario((0, 0, 0), (10, 10, 10), w0=np.array([0.05, -0.03, 0.02])),
     ]
     return scenarios
 
@@ -60,7 +82,7 @@ def main():
     print(f"=== Running {len(scenarios)} trajectories ===")
     batch_results = run_batch(base_cfg, scenarios)
 
-    plot_batch(batch_results, scenarios)
+    plot_batch(batch_results, scenarios, base_cfg)
     plt.show()
 
     export_batch_to_mat(batch_results, scenarios, base_cfg,
