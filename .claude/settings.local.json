@@ -74,7 +74,10 @@
       "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" test_rigid_body_pd_v2.py)",
       "Bash('C:\\\\ProgramData\\\\anaconda3\\\\python.exe' -c ' *)",
       "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" test_rigid_body_pd_v3.py)",
-      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" -c \"import ast; ast.parse\\(open\\('rigid_body_pd_v3.py', encoding='utf-8'\\).read\\(\\)\\)\")"
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" -c \"import ast; ast.parse\\(open\\('rigid_body_pd_v3.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(where pdflatex *)",
+      "Bash(where xelatex *)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" \"C:\\\\Users\\\\mfogel\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Personal-Pending-Personal-Stuff-Rutgers-Research-3DoF-RBD-Toy-Problem\\\\4c4d69ef-3bcd-402a-b2b5-3171fbdcd6df\\\\scratchpad\\\\check_tex.py\")"
     ]
   }
 }

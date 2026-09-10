@@ -8,7 +8,9 @@
 %
 % REQUIRED PACKAGES (most Overleaf templates already load these)
 %       \usepackage{amsmath, amssymb}
-%       \usepackage{bm}     % bold math symbols
+%       \usepackage{bm}       % bold math symbols
+%       \usepackage{booktabs} % \toprule/\midrule/\bottomrule in tables
+%       \usepackage{array}    % p{} column type in tables
 %
 % BIBLIOGRAPHY
 %   Add the following entry to your .bib file so that \cite{markley2014}
@@ -108,7 +110,10 @@ The total external torque on the body collects three contributions:
 \label{eq:u-body-decomp}
 \end{equation}
 the wheel reaction torque, the magnetic-torquer torque, and the propellant
-slosh torque defined in Sections~\ref{sec:bdot} and~\ref{sec:slosh}.
+slosh torque defined in Sections~\ref{sec:bdot} and~\ref{sec:slosh}. A full
+breakdown of these three contributions — including which is exported as
+``control torque'' in the MATLAB data files and which is not — is given in
+Section~\ref{sec:u-body-detail}.
 
 
 % ---------------------------------------------------------------------
@@ -222,7 +227,22 @@ body frame.
 Liquid propellant slosh is modelled as a forced, damped second-order
 oscillator acting on a 3-D torque state $\bm{T}_{\!s}\in\mathbb{R}^{3}$,
 driven by body rate $\bm{\omega}$ and body angular acceleration
-$\dot{\bm{\omega}}$:
+$\dot{\bm{\omega}}$. Two interchangeable forms of this oscillator are
+implemented in the code; exactly one is active per simulation run,
+selected by the configuration field \texttt{slosh\_model} (``bourdelle''
+or ``testing''). Both enter Euler's equation~\eqref{eq:euler-wheels} in
+exactly the same way, through $\bm{T}_{\!s}$
+in~\eqref{eq:u-body-decomp}: because $\bm{T}_{\!s}$ is a \emph{state} (not
+an instantaneous algebraic function of $\dot{\bm{\omega}}$), there is no
+implicit loop in either case --- $\dot{\bm{\omega}}$ is computed
+from~\eqref{eq:euler-wheels} using the current $\bm{T}_{\!s}$, and the
+just-computed $\dot{\bm{\omega}}$ is then substituted into whichever
+second-order slosh law is active.
+
+\subsubsection{Model ``bourdelle'' (default): Time-Varying Linear Model}
+\label{sec:slosh-bourdelle}
+
+The original slosh model takes the form
 \begin{equation}
 \boxed{\;
 \ddot{\bm{T}}_{\!s}
@@ -243,15 +263,143 @@ f(t) \;=\; f_{\text{nom}} + f_{\text{amp}}\sin(\omega_f\,t),
 \label{eq:slosh-coeff}
 \end{equation}
 Requiring $f_{\text{nom}} > |f_{\text{amp}}|$ keeps $K_s,C_s$ strictly
-positive (a negative stiffness or damping would be unphysical).
+positive (a negative stiffness or damping would be unphysical). With the
+default $f_{\text{amp}} = 0$, each coefficient reduces to a constant equal
+to $f_{\text{nom}}$.
 
-The slosh torque enters Euler's equation~\eqref{eq:euler-wheels} as an
-external disturbance through $\bm{T}_{\!s}$ in~\eqref{eq:u-body-decomp}.
-Because $\bm{T}_{\!s}$ is a \emph{state} (not an instantaneous algebraic
-function of $\dot{\bm{\omega}}$), there is no implicit loop:
-$\dot{\bm{\omega}}$ is computed from~\eqref{eq:euler-wheels} using the
-current $\bm{T}_{\!s}$, and the just-computed $\dot{\bm{\omega}}$ is then
-substituted into~\eqref{eq:slosh}.
+Physically, $K_s$ is the slosh mode's spring-like restoring stiffness,
+$C_s$ its damping, and $A_s, B_s$ are forcing gains that convert the
+spacecraft's own body rate and angular acceleration into a slosh-torque
+excitation --- the more aggressively the spacecraft rotates or
+accelerates, the harder the propellant sloshes back.
+
+\subsubsection{Model ``testing'': Rate-Dependent Stiffness/Damping Model}
+\label{sec:slosh-testing}
+
+An alternate second-order model replaces the constant/sinusoidal
+coefficients of Eq.~\eqref{eq:slosh} with stiffness and damping terms that
+scale with the \emph{ratio} of the instantaneous body rate $\Omega$ to a
+reference maximum rate $\Omega_{\max}$:
+\begin{equation}
+\boxed{\;
+\ddot{\bm{T}}_{\!s}
+\;=\;
+ -\,\omega_n^{2}\,\bm{T}_{\!s}
+ \;-\;
+ \frac{2\zeta\,\omega_n}{1+\bigl(\Omega/\Omega_{\max}\bigr)^{2}}\,
+ \dot{\bm{T}}_{\!s}
+ \;+\;
+ \omega_n^{2}\Bigl(1+\bigl(\Omega/\Omega_{\max}\bigr)^{2}\Bigr)\,
+ \dot{\Omega},
+\;}
+\label{eq:slosh-testing}
+\end{equation}
+applied independently per body axis, with $\Omega \equiv \omega$ and
+$\dot\Omega \equiv \dot{\omega}$ evaluated component-wise. The model
+parameters are the sloshing mode's natural frequency $\omega_n$, its
+damping ratio $\zeta$, and the saturation rate $\Omega_{\max}$; the
+implied stiffness and nominal damping follow the standard second-order
+relations $K_s = \omega_n^{2}$ and $C_s = 2\zeta\,\omega_n$. The default
+parameters used in the simulation are
+\begin{equation}
+\omega_n = 0.08944~\text{rad/s}, \qquad
+\zeta = 0.1286, \qquad
+\Omega_{\max} = 0.418879~\text{rad/s}
+\;\bigl(=24^\circ/\text{s}\bigr),
+\end{equation}
+consistent with $C_s = 23\times10^{-3}$ and $K_s = 8\times10^{-3}$ as
+reported for the reference sloshing mode.
+
+Unlike the ``bourdelle'' model, here the effective damping and forcing
+gain both scale with $1+(\Omega/\Omega_{\max})^{2}$: as the body spin rate
+$\Omega$ approaches the reference rate $\Omega_{\max}$, the damping term
+on $\dot{\bm{T}}_{\!s}$ \emph{softens} (its coefficient shrinks, since the
+factor appears in the denominator) while the forcing from $\dot{\Omega}$
+\emph{strengthens} by the same factor --- i.e.\ the slosh mode becomes
+progressively more lightly damped and more strongly excited as the
+spacecraft spins faster, modelling a propellant response that grows more
+violent near the vehicle's operational rate limit.
+
+
+% ---------------------------------------------------------------------
+\subsection{Net Body Torque Decomposition}
+\label{sec:u-body-detail}
+
+The quantity $\bm{u}_{\text{body}}$ appearing on the right-hand side of
+Euler's equation~\eqref{eq:euler-wheels} is not itself a single physical
+actuator output --- it is the superposition of every torque source
+introduced in Sections~\ref{sec:wheels}--\ref{sec:slosh}, each of which can
+be independently enabled or disabled:
+\begin{equation}
+\bm{u}_{\text{body}}
+\;=\;
+\underbrace{\bm{u}_{\text{act}}}_{\text{actuator torque}}
+\;+\;
+\underbrace{\bm{\tau}_{\text{mag}}}_{\text{magnetic torque}}
+\;+\;
+\underbrace{\bm{T}_{\!s}}_{\text{slosh disturbance}}.
+\label{eq:u-body-full}
+\end{equation}
+Table~\ref{tab:u-body-terms} details each contribution: how it is
+computed, which configuration toggle controls it, and its physical origin.
+
+\begin{table}[h]
+\centering
+\caption{Contributions to the net body torque $\bm{u}_{\text{body}}$.}
+\label{tab:u-body-terms}
+\begin{tabular}{@{}p{2.6cm}p{2.3cm}p{4.6cm}p{4.5cm}@{}}
+\toprule
+\textbf{Contribution} & \textbf{Toggle} & \textbf{Computed as} & \textbf{Physical origin} \\
+\midrule
+Actuator torque $\bm{u}_{\text{act}}$
+ & \texttt{enable\_wheels}
+ & Wheels ON: $\bm{u}_{\text{act}} = -\bm{W}\bm{\tau}_w$
+   (Eq.~\ref{eq:wheel-alloc}), the reaction of the allocated wheel
+   torques onto the body (Newton's third law).\newline
+   Wheels OFF: $\bm{u}_{\text{act}} = \bm{u}_{\text{cmd}}$, the raw PD
+   command (Eq.~\ref{eq:pd}) applied directly as an idealised torque
+   actuator.
+ & The physically-realised control effort — either mediated through
+   real wheel hardware or an idealised direct-torque actuator used to
+   study the controller/plant in isolation from wheel dynamics. \\[6pt]
+Magnetic torque $\bm{\tau}_{\text{mag}}$
+ & \texttt{enable\_magnetorquer}
+ & $\bm{\tau}_{\text{mag}} = \bm{m}\times\bm{B}$, with $\bm{m}$ from the
+   $\bm{B}$-dot--style law, Eq.~\ref{eq:bdot}. Zero when disabled.
+ & Momentum-dumping disturbance/actuation: only nonzero once wheels
+   have accumulated momentum to unload, and only along the subspace
+   perpendicular to the instantaneous geomagnetic field. \\[6pt]
+Slosh disturbance $\bm{T}_{\!s}$
+ & \texttt{enable\_slosh}
+ & Integrated state governed by Eq.~\ref{eq:slosh}
+   or~\ref{eq:slosh-testing} (model-dependent). Zero when disabled.
+ & Reaction torque from propellant sloshing, excited by the
+   spacecraft's own body rate and angular acceleration. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Three related but distinct torque quantities.} It is worth
+explicitly distinguishing three torque quantities that are easy to
+conflate:
+\begin{enumerate}\setlength{\itemsep}{2pt}
+  \item $\bm{u}_{\text{cmd}}$ --- the \emph{raw PD command}
+        (Eq.~\ref{eq:pd}), computed directly from attitude/rate error,
+        before any actuator allocation.
+  \item $\bm{u}_{\text{act}} + \bm{\tau}_{\text{mag}}$ --- the
+        \emph{control torque} actually delivered to the body by the
+        controller and momentum-management subsystems, \emph{excluding}
+        the slosh disturbance. This is precisely the quantity exported
+        as the $u_x, u_y, u_z$ columns in the MATLAB data files (see
+        Section~\ref{sec:matlab-export}) — a deliberate choice so that
+        post-processed data cleanly separates ``what the control system
+        did'' from ``what the environment/disturbance did.''
+  \item $\bm{u}_{\text{body}}$ --- the \emph{full net torque}
+        (Eq.~\ref{eq:u-body-full}) actually substituted into Euler's
+        equation, including the slosh contribution $\bm{T}_{\!s}$, which
+        is exported separately as its own $T_{s,x}, T_{s,y}, T_{s,z}$
+        columns.
+\end{enumerate}
 
 
 % ---------------------------------------------------------------------
@@ -330,3 +478,204 @@ Two integrators are provided for the augmented state:
 \end{itemize}
 Both integrators share the same dynamics, controller, and slosh
 modules; only the time-stepping strategy differs.
+
+
+% =====================================================================
+\section{Multi-Trajectory Batch Simulations}
+\label{sec:batch}
+
+It is often desirable to evaluate a \emph{family} of attitude maneuvers on
+one physically fixed spacecraft --- e.g.\ to characterise controller
+performance across a range of start/target attitudes --- while holding
+every platform property (inertia tensor, wheel geometry, gains, slosh
+model and coefficients) constant. The batch driver \texttt{run\_batch()}
+implements exactly this pattern.
+
+\subsection{Base Configuration and Scenario Overrides}
+\label{sec:batch-config}
+
+A single \emph{base configuration} carries every fixed platform property.
+A \emph{scenario} is a small dictionary specifying only the handful of
+fields that vary between runs: the initial attitude quaternion
+$\bm{q}_0$, the target attitude quaternion $\bm{q}_{\text{des}}$, and
+optionally a nonzero initial body rate $\bm{\omega}_0$. For each scenario,
+\texttt{run\_batch()}:
+\begin{enumerate}\setlength{\itemsep}{2pt}
+  \item makes an independent \emph{deep copy} of the base configuration
+        (essential, since the configuration holds mutable containers ---
+        NumPy arrays and the slosh-coefficient dictionary --- that a
+        shallow copy would leave \emph{shared} across scenarios, silently
+        corrupting earlier or later runs);
+  \item overrides only the fields present in that scenario's dictionary
+        ($\bm{q}_0$, $\bm{q}_{\text{des}}$, and/or $\bm{\omega}_0$);
+  \item runs the full closed-loop simulation of Section~\ref{sec:state}
+        unchanged, via \texttt{simulate()};
+\end{enumerate}
+and returns the list of per-scenario results, in the same order as the
+input scenario list. Wheel momentum $\bm{h}_w$ is not an overridable
+scenario field; every run begins with the wheels at rest
+($\bm{h}_w(0)=\bm{0}$), consistent with Section~\ref{sec:wheels}.
+
+\subsection{Example Scenario Set: Ten Attitude Slews}
+\label{sec:batch-example}
+
+A \emph{slew} maneuver is a commanded rotation from one attitude to
+another --- the spacecraft is driven from $\bm{q}_0$ to
+$\bm{q}_{\text{des}}$ by the closed-loop controller of
+Section~\ref{sec:pd-controller}, as opposed to a small stationkeeping
+correction. The example script builds ten such slews, all capped at
+$45^\circ$ per axis, designed to isolate distinct coupling behaviours
+one at a time. Table~\ref{tab:ten-scenarios} lists the set; all start
+from $(\phi,\theta,\psi) = (0,0,0)^\circ$ unless noted.
+
+\begin{table}[h]
+\centering
+\caption{Ten example attitude-slew scenarios (3-2-1 Euler angles in
+degrees; body rates in rad/s).}
+\label{tab:ten-scenarios}
+\begin{tabular}{@{}clp{7.2cm}@{}}
+\toprule
+\textbf{\#} & \textbf{Target $(\phi,\theta,\psi)$} & \textbf{Purpose} \\
+\midrule
+1  & $(45,0,0)$      & Roll-only --- isolates $x$-axis response. \\
+2  & $(0,45,0)$      & Pitch-only --- isolates $y$-axis response. \\
+3  & $(0,0,45)$      & Yaw-only --- isolates $z$-axis response. \\
+4  & $(45,45,0)$     & Roll+pitch coupled. \\
+5  & $(45,0,45)$     & Roll+yaw coupled. \\
+6  & $(0,45,45)$     & Pitch+yaw coupled. \\
+7  & $(45,45,45)$    & All three axes simultaneously (maximum coupling). \\
+8  & $(-45,-45,-45)$ & Same magnitude as \#7, opposite direction ---
+                        checks symmetry of the response. \\
+9  & $(45,-45,45)$   & Mixed-sign multi-axis slew --- checks that axis
+                        coupling behaves consistently when commanded
+                        directions differ, not only when all axes share
+                        the same sign. \\
+10 & $(10,10,10)$    & Small-angle target reached from a \emph{nonzero}
+                        initial body rate $\bm{\omega}_0 = (0.05,\,
+                        -0.03,\,0.02)^\top$ rad/s --- tests near-linear
+                        response in the presence of an existing
+                        disturbance, rather than starting from rest. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Batch Plotting}
+\label{sec:batch-plot}
+
+For each scenario, two figure windows are produced: the full
+nine-panel telemetry figure (attitude quaternion, error quaternion, body
+rate, control torque, wheel momentum/torque, magnetorquer dipole/torque,
+and slosh torque) and a compact two-panel Euler-angle/body-rate figure,
+each titled with the scenario's start and target angles. Figures may
+optionally be written to disk as PNG images in a specified output
+directory, in addition to being displayed interactively.
+
+
+% =====================================================================
+\section{MATLAB Data Export (.mat)}
+\label{sec:matlab-export}
+
+Simulation results are exported to MATLAB-compatible \texttt{.mat} files
+for post-processing outside the Python environment. Two related export
+functions share a common per-trajectory column layout: one exports a
+single trajectory, the other stacks an entire batch (Section~\ref{sec:batch})
+into one file.
+
+\subsection{Per-Trajectory Column Layout}
+\label{sec:matlab-columns}
+
+Every exported trajectory is reduced to a single $(n_t \times 19)$
+matrix: one time column followed by eighteen data columns, grouped into
+six physical quantities of three components each. Body angular
+acceleration $\dot{\bm{\omega}}$ is not itself an integrated state (only
+$\bm{\omega}$ is), so it is reconstructed by numerically differentiating
+the saved $\bm{\omega}$ history; likewise the Euler angles are obtained
+from the quaternion history via the conversion of
+Section~\ref{sec:euler-conv}, purely for human-readable output. Table~
+\ref{tab:matlab-columns} lists every column.
+
+\begin{table}[h]
+\centering
+\caption{Column layout of the exported $(n_t\times 19)$ data matrix.}
+\label{tab:matlab-columns}
+\begin{tabular}{@{}clcp{6.4cm}@{}}
+\toprule
+\textbf{Col.} & \textbf{Name(s)} & \textbf{Units} & \textbf{Description} \\
+\midrule
+1     & \texttt{t} & s & Simulation time. \\
+2--4  & \texttt{roll, pitch, yaw} & deg &
+        3-2-1 Euler angles $(\phi,\theta,\psi)$, Section~\ref{sec:euler-conv}. \\
+5--7  & \texttt{wx, wy, wz} & rad/s &
+        Body angular velocity $\bm{\omega}$. \\
+8--10 & \texttt{wx\_dot, wy\_dot, wz\_dot} & rad/s$^2$ &
+        Body angular acceleration $\dot{\bm{\omega}}$, obtained by
+        numerical differentiation of $\bm{\omega}$ (not directly
+        integrated by the solver). \\
+11--13 & \texttt{ux, uy, uz} & N$\cdot$m &
+        \emph{Control torque}: $\bm{u}_{\text{act}}+\bm{\tau}_{\text{mag}}$
+        --- the actuator plus magnetorquer torque actually applied to the
+        body, deliberately \emph{excluding} the slosh disturbance
+        $\bm{T}_{\!s}$ (see Section~\ref{sec:u-body-detail}). \\
+14--16 & \texttt{Tsx, Tsy, Tsz} & N$\cdot$m &
+        Propellant slosh disturbance torque $\bm{T}_{\!s}$
+        (Section~\ref{sec:slosh}); identically zero when
+        \texttt{enable\_slosh} is off. \\
+17--19 & \texttt{Fsx, Fsy, Fsz} & N &
+        \emph{Placeholder} sloshing \emph{force} columns, currently held
+        at exactly zero. Reserved for a future force-level slosh model;
+        not yet physically modelled. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Single-Trajectory File}
+\label{sec:matlab-single}
+
+For one simulation run, the exported \texttt{.mat} file contains two
+top-level variables:
+\begin{itemize}\setlength{\itemsep}{2pt}
+  \item \texttt{data} --- the $(n_t\times 19)$ matrix of
+        Table~\ref{tab:matlab-columns};
+  \item \texttt{labels} --- a $1\times 19$ cell array of column-name
+        strings, in the same order as \texttt{data}'s columns.
+\end{itemize}
+
+\subsection{Batch File}
+\label{sec:matlab-batch}
+
+For a batch of $N$ scenarios (Section~\ref{sec:batch}), all trajectories
+are stacked into a single \texttt{.mat} file containing one top-level
+variable:
+\begin{itemize}\setlength{\itemsep}{2pt}
+  \item \texttt{trajectories} --- a $1\times N$ MATLAB \emph{cell array},
+        one cell per scenario, each holding a \emph{struct} with fields:
+    \begin{itemize}\setlength{\itemsep}{2pt}
+      \item \texttt{data} --- that scenario's $(n_t\times 19)$ matrix
+            (Table~\ref{tab:matlab-columns});
+      \item \texttt{labels} --- the same $1\times 19$ column-name cell
+            array;
+      \item \texttt{q0\_deg} --- $[\,\phi_0,\theta_0,\psi_0\,]$, the
+            scenario's initial Euler angles, in degrees;
+      \item \texttt{qdes\_deg} --- $[\,\phi_{\text{des}},
+            \theta_{\text{des}},\psi_{\text{des}}\,]$, the scenario's
+            target Euler angles, in degrees.
+    \end{itemize}
+\end{itemize}
+In MATLAB, an individual trajectory's data is accessed as
+\texttt{trajectories\{i\}.data}, with column names available via
+\texttt{trajectories\{i\}.labels}.
+
+\paragraph{Gimbal-lock note on \texttt{q0\_deg}/\texttt{qdes\_deg}.} These
+degree labels are recorded from the \emph{exact} angles originally
+requested when the scenario was constructed, rather than recovered after
+the fact from the quaternion via the inverse conversion of
+Section~\ref{sec:euler-conv}. The two are not always equivalent: at pitch
+$=\pm 90^\circ$ (gimbal lock), infinitely many $(\phi,\theta,\psi)$
+triples map to the same physical attitude quaternion, so recovering
+angles by inverse conversion can report a triple that is
+mathematically equivalent but visually different from what was actually
+requested (e.g.\ $(180^\circ,90^\circ,180^\circ)$ instead of the intended
+$(0^\circ,90^\circ,0^\circ)$). Recording the original request avoids this
+ambiguity; the underlying simulated dynamics are unaffected either way,
+since the simulation operates on quaternions throughout and only these
+two label fields are affected.
