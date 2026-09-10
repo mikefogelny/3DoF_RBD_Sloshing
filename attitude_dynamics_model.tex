@@ -1,36 +1,34 @@
 % =====================================================================
 % Spacecraft Attitude Dynamics and Control Model — physics summary
 %
-% USAGE
-%   In your Overleaf project's main .tex file, add:
-%       \input{attitude_dynamics_model.tex}
-%   wherever you want the section to appear.
+% This is a COMPLETE, STANDALONE LaTeX document -- compile it directly
+% (e.g. upload to a new Overleaf project, or run pdflatex twice on this
+% file) and it will produce a full PDF on its own.
 %
-% REQUIRED PACKAGES (most Overleaf templates already load these)
-%       \usepackage{amsmath, amssymb}
-%       \usepackage{bm}       % bold math symbols
-%       \usepackage{booktabs} % \toprule/\midrule/\bottomrule in tables
-%       \usepackage{array}    % p{} column type in tables
-%
-% BIBLIOGRAPHY
-%   Add the following entry to your .bib file so that \cite{markley2014}
-%   resolves correctly:
-%
-%   @book{markley2014,
-%     author    = {Markley, F. Landis and Crassidis, John L.},
-%     title     = {Fundamentals of Spacecraft Attitude Determination and Control},
-%     publisher = {Springer},
-%     year      = {2014},
-%     series    = {Space Technology Library},
-%     volume    = {33},
-%     address   = {New York, NY},
-%     doi       = {10.1007/978-1-4939-0802-8}
-%   }
-%
-%   If you are not using BibTeX, replace the \cite{markley2014} occurrences
-%   below with a manual reference such as "Markley \& Crassidis (2014)".
+% If you instead want to fold this content into a LARGER existing
+% document as one section among others, you can still do that: just
+% delete everything from \documentclass down to \begin{document}
+% (inclusive) and the closing \end{document} at the end of the file,
+% and \input{attitude_dynamics_model.tex} the remainder from your own
+% main .tex file, provided your preamble already loads the packages
+% listed below and defines \cite{markley2014} via your own .bib file.
 % =====================================================================
 
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{bm}       % bold math symbols
+\usepackage{booktabs} % \toprule/\midrule/\bottomrule in tables
+\usepackage{array}    % p{} column type in tables
+\usepackage{hyperref}
+
+\title{Spacecraft Attitude Dynamics and Control Model}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
 
 \section{Spacecraft Attitude Dynamics and Control Model}
 \label{sec:attitude-model}
@@ -679,3 +677,32 @@ $(0^\circ,90^\circ,0^\circ)$). Recording the original request avoids this
 ambiguity; the underlying simulated dynamics are unaffected either way,
 since the simulation operates on quaternions throughout and only these
 two label fields are affected.
+
+
+% =====================================================================
+% Bibliography (manual thebibliography -- no external .bib file needed
+% for this document to compile standalone). If you fold this content
+% into a larger document with its own BibTeX setup, delete this block
+% and instead add the equivalent entry to your .bib file:
+%
+%   @book{markley2014,
+%     author    = {Markley, F. Landis and Crassidis, John L.},
+%     title     = {Fundamentals of Spacecraft Attitude Determination and Control},
+%     publisher = {Springer},
+%     year      = {2014},
+%     series    = {Space Technology Library},
+%     volume    = {33},
+%     address   = {New York, NY},
+%     doi       = {10.1007/978-1-4939-0802-8}
+%   }
+% =====================================================================
+
+\begin{thebibliography}{9}
+\bibitem{markley2014}
+F.~L. Markley and J.~L. Crassidis,
+\emph{Fundamentals of Spacecraft Attitude Determination and Control},
+Space Technology Library, Vol.~33, Springer, New York, NY, 2014.
+\href{https://doi.org/10.1007/978-1-4939-0802-8}{doi:10.1007/978-1-4939-0802-8}.
+\end{thebibliography}
+
+\end{document}
