@@ -839,7 +839,7 @@ def _scenario_start_target_deg(sc, cfg):
     return q0_deg, qdes_deg
 
 
-def plot_batch(batch_results, scenarios=None, cfg=None):
+def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None):
     """
     Plot each trajectory from a `run_batch()` result in its own separate
     set of figure windows, labeled with its scenario index and, if
@@ -862,7 +862,16 @@ def plot_batch(batch_results, scenarios=None, cfg=None):
     cfg : SimConfig, optional
         The base_cfg used for the batch; only needed as a fallback source
         of q0/q_des if a scenario doesn't override them.
+    save_dir : str, optional
+        If given, save each figure as a PNG in this directory (created if
+        it doesn't already exist), named `scenario{i:02d}_telemetry.png`
+        and `scenario{i:02d}_angles.png`. Figures still open as normal
+        windows either way -- this only additionally writes them to disk.
     """
+    if save_dir is not None:
+        import os
+        os.makedirs(save_dir, exist_ok=True)
+
     for i, results in enumerate(batch_results):
         title = f"Scenario {i}"
         if scenarios is not None:
@@ -875,6 +884,9 @@ def plot_batch(batch_results, scenarios=None, cfg=None):
         fig = plt.gcf()
         fig.suptitle(title)
         fig.canvas.manager.set_window_title(title + " (telemetry)")
+        if save_dir is not None:
+            fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_telemetry.png"),
+                       dpi=150, bbox_inches="tight")
 
         # 2-panel Euler-angle + body-rate figure.
         t, q_hist, w_hist = results[0], results[1], results[3]
@@ -882,6 +894,12 @@ def plot_batch(batch_results, scenarios=None, cfg=None):
         fig = plt.gcf()
         fig.suptitle(title)
         fig.canvas.manager.set_window_title(title + " (angles)")
+        if save_dir is not None:
+            fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_angles.png"),
+                       dpi=150, bbox_inches="tight")
+
+    if save_dir is not None:
+        print(f"Saved {2 * len(batch_results)} figures to {save_dir}")
 
 
 # =====================================================================

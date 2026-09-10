@@ -77,7 +77,7 @@ def build_scenarios():
 
 def main():
     base_cfg = mc_example_72()
-    base_cfg.t_end = 300.0     # long enough to see each maneuver settle
+    base_cfg.t_end = 600.0     # long enough to see each maneuver settle
     base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
 
     scenarios = build_scenarios()
@@ -85,7 +85,7 @@ def main():
     print(f"=== Running {len(scenarios)} trajectories ===")
     batch_results = run_batch(base_cfg, scenarios)
 
-    plot_batch(batch_results, scenarios, base_cfg)
+    plot_batch(batch_results, scenarios, base_cfg, save_dir="plots")
     plt.show()
 
     export_batch_to_mat(batch_results, scenarios, base_cfg,
