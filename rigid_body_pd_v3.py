@@ -800,7 +800,12 @@ def plot_euler_and_rates(t, q_hist, w_hist):
     ax[0].set_ylabel("Euler angle (deg)")
     ax[0].legend(["roll  ($\\phi$)", "pitch ($\\theta$)", "yaw  ($\\psi$)"], loc="right")
     ax[0].grid(True)
-    ax[0].set_title("Attitude angles and body rates (3-2-1 sequence)")
+    # No ax[0].set_title() here -- when this figure is produced via
+    # plot_batch(), that function sets its own fig.suptitle() with the
+    # scenario's start/target angles; a second, static axis-level title
+    # would visually overlap it. When plot_euler_and_rates() is called
+    # standalone (not through plot_batch), the ylabel + legend already
+    # make the panel's content clear without a redundant title.
 
     ax[1].plot(t, w_deg)
     ax[1].set_ylabel("Body rate (deg/s)")
@@ -883,6 +888,11 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None):
         plot_results(*results)
         fig = plt.gcf()
         fig.suptitle(title)
+        # plot_results()/plot_euler_and_rates() both call plt.tight_layout()
+        # internally, BEFORE this suptitle is added -- so without reserving
+        # extra headroom here, the title can crowd or overlap the topmost
+        # subplot. subplots_adjust(top=...) carves out that headroom.
+        fig.subplots_adjust(top=0.94)
         fig.canvas.manager.set_window_title(title + " (telemetry)")
         if save_dir is not None:
             fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_telemetry.png"),
@@ -893,6 +903,7 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None):
         plot_euler_and_rates(t, q_hist, w_hist)
         fig = plt.gcf()
         fig.suptitle(title)
+        fig.subplots_adjust(top=0.88)
         fig.canvas.manager.set_window_title(title + " (angles)")
         if save_dir is not None:
             fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_angles.png"),
