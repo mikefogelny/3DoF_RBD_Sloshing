@@ -73,7 +73,8 @@
       "Bash(git push *)",
       "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" test_rigid_body_pd_v2.py)",
       "Bash('C:\\\\ProgramData\\\\anaconda3\\\\python.exe' -c ' *)",
-      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" test_rigid_body_pd_v3.py)"
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" test_rigid_body_pd_v3.py)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" -c \"import ast; ast.parse\\(open\\('rigid_body_pd_v3.py', encoding='utf-8'\\).read\\(\\)\\)\")"
     ]
   }
 }
