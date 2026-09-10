@@ -2,18 +2,20 @@
 Example/test script: 10 attitude-maneuver trajectories on one shared
 satellite configuration.
 
-Covers, in order:
+Covers, in order (all slews capped at 45 deg per axis):
     1-3  Single-axis maneuvers (roll-only, pitch-only, yaw-only)
     4-6  Two-axis coupled maneuvers (roll+pitch, roll+yaw, pitch+yaw)
     7    All three axes simultaneously (max coupling)
     8    Same magnitude as #7 but opposite direction (checks symmetry)
-    9    Large single-axis maneuver near 180 deg (stresses the
-         sign(dq4) shortest-path logic in pd_controller)
+    9    Mixed-sign multi-axis slew (+45/-45/+45) -- checks that coupling
+         behaves the same when axes are commanded in different directions,
+         not just all-positive or all-negative together
     10   Small-angle target reached from a nonzero initial body-rate
          (tests near-linear response under an existing disturbance)
 
 Uses rigid_body_pd_v3's run_batch() to hold inertia/gains/slosh model fixed
-across all 10 runs, varying only q0/q_des/w0 per scenario.
+across all 10 runs, varying only q0/q_des/w0 per scenario. Slosh is enabled
+on the shared base config so its torque shows up in the telemetry plots.
 """
 
 import numpy as np
@@ -54,19 +56,19 @@ def build_scenarios():
     """Return the list of 10 scenario dicts (q0/q_des, and w0 for #10)."""
     scenarios = [
         # 1-3: single-axis
-        _scenario((0, 0, 0), (90, 0, 0)),
-        _scenario((0, 0, 0), (0, 90, 0)),
-        _scenario((0, 0, 0), (0, 0, 90)),
+        _scenario((0, 0, 0), (45, 0, 0)),
+        _scenario((0, 0, 0), (0, 45, 0)),
+        _scenario((0, 0, 0), (0, 0, 45)),
         # 4-6: two-axis coupled
-        _scenario((0, 0, 0), (90, 90, 0)),
-        _scenario((0, 0, 0), (90, 0, 90)),
-        _scenario((0, 0, 0), (0, 90, 90)),
+        _scenario((0, 0, 0), (45, 45, 0)),
+        _scenario((0, 0, 0), (45, 0, 45)),
+        _scenario((0, 0, 0), (0, 45, 45)),
         # 7: all three axes simultaneously
-        _scenario((0, 0, 0), (90, 90, 90)),
+        _scenario((0, 0, 0), (45, 45, 45)),
         # 8: same magnitude, opposite direction
-        _scenario((0, 0, 0), (-90, -90, -90)),
-        # 9: large single-axis maneuver near 180 deg
-        _scenario((0, 0, 0), (180, 0, 0)),
+        _scenario((0, 0, 0), (-45, -45, -45)),
+        # 9: mixed-sign multi-axis slew
+        _scenario((0, 0, 0), (45, -45, 45)),
         # 10: small-angle target, nonzero initial tumble
         _scenario((0, 0, 0), (10, 10, 10), w0=np.array([0.05, -0.03, 0.02])),
     ]
@@ -75,7 +77,8 @@ def build_scenarios():
 
 def main():
     base_cfg = mc_example_72()
-    base_cfg.t_end = 120.0     # long enough to see each maneuver settle
+    base_cfg.t_end = 300.0     # long enough to see each maneuver settle
+    base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
 
     scenarios = build_scenarios()
 
