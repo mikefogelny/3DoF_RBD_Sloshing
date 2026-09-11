@@ -86,6 +86,7 @@ def main():
     base_cfg = spicesat()
     base_cfg.t_end = 600.0     # long enough to see each maneuver settle
     base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
+    base_cfg.enable_wheel_dynamics = True   # wheel torque ramps instead of jumping instantly
     # Default Kd=150 leaves multi-axis slews with a persistent, non-decaying
     # oscillation (a genuine gyroscopic/coupling instability, confirmed
     # independent of slosh and solver tolerance -- see project history).
