@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 
 from rigid_body_pd_v3 import (
     mc_example_72, euler321_to_quat,
-    run_batch, plot_batch, export_batch_to_mat,
+    run_batch, plot_batch, export_batch_to_mat,spicesat,
 )
 
 
@@ -82,7 +82,8 @@ def build_scenarios():
 
 
 def main():
-    base_cfg = mc_example_72()
+#    base_cfg = mc_example_72()
+    base_cfg = spicesat()
     base_cfg.t_end = 600.0     # long enough to see each maneuver settle
     base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
     # Default Kd=150 leaves multi-axis slews with a persistent, non-decaying
@@ -91,7 +92,7 @@ def main():
     # Kd=500 was swept against all 10 scenarios above and cleanly converges
     # every one (residual oscillation shrinks monotonically to <0.001 deg
     # by t=6000s, including the toughest 40/40/40 case).
-    base_cfg.Kd = 500
+    # base_cfg.Kd = 500 # only used for MC7.2 example
 
     scenarios = build_scenarios()
 

@@ -33,6 +33,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from scipy.integrate import solve_ivp
+from scipy.signal import tf2ss
 
 
 # =====================================================================
@@ -80,6 +81,21 @@ class SimConfig:
     u_max:  float = 1000.0   # N·m,    per-axis PD torque saturation
     K_dump: float = 1.0      # 1/s,    magnetic momentum-dump gain
     m_max:  float = 500.0    # A·m^2,  per-axis magnetorquer dipole saturation
+
+    # ---- Reaction-wheel actuator dynamics (2nd-order low-pass, per wheel) ----
+    # Real wheels don't respond instantly -- they have finite spin-up/down
+    # dynamics. Modeled here as a transfer function
+    #     tau_actual(s) / tau_cmd(s) = wheel_tf_num(s) / wheel_tf_den(s)
+    # applied independently per wheel. Coefficients are in descending powers
+    # of s (scipy.signal convention), so changing the actuator response is
+    # just editing these two coefficient lists -- any filter order, no
+    # manual state-space/canonical-form derivation needed (see
+    # wheel_actuator_dynamics(), which builds the state-space realization
+    # automatically via scipy.signal.tf2ss). Default: instantaneous
+    # response (filter bypassed) unless enabled.
+    enable_wheel_dynamics: bool = False
+    wheel_tf_num: list = field(default_factory=lambda: [1.2, 0.76])       # 1.2*s + 0.76
+    wheel_tf_den: list = field(default_factory=lambda: [1.0, 2.4, 0.76])  # s^2 + 2.4*s + 0.76
 
     # ---- Slosh model selector: 'bourdelle' (default) or 'testing' ----
     # Two interchangeable second-order ODEs describe how sloshing propellant
@@ -199,7 +215,7 @@ def spicesat() -> SimConfig:
     cfg.Ixx, cfg.Iyy, cfg.Izz = 0.09579692958, 0.08815373599, 0.05163644679
     cfg.Ixy, cfg.Ixz, cfg.Iyz = 0.00285635546, 0.00349183595, 0.00514615995
     cfg.u_max = 0.005          # N*m, per-axis wheel/PD torque saturation
-    cfg.Kp, cfg.Kd = 0.05, 10.0
+    cfg.Kp, cfg.Kd = 0.05, 1.0
     return cfg
 
 
@@ -329,6 +345,43 @@ def allocate_wheel_torque(u_cmd, W_pinv):
     wheels up the least for the commanded body torque.
     """
     return -W_pinv @ u_cmd
+
+
+def wheel_to_ss(num, den):
+    """
+    Convert a wheel-actuator transfer function tau_actual(s)/tau_cmd(s) =
+    num(s)/den(s) into a state-space realization (A, B, C) via
+    scipy.signal.tf2ss. Assumes a strictly proper TF (D = 0), true for any
+    physically realizable low-pass actuator response.
+
+    Call this ONCE per simulation (in simulate()) -- not per RHS
+    evaluation -- and reuse the resulting (A, B, C) via wheel_actuator_dynamics().
+    """
+    A, B, C, D = tf2ss(num, den)
+    if not np.allclose(D, 0.0):
+        raise ValueError("wheel_tf_num/wheel_tf_den must be strictly proper (deg(num) < deg(den))")
+    return A, B, C
+
+
+def wheel_actuator_dynamics(x, tau_cmd, A, B, C):
+    """
+    Per-wheel reaction-wheel actuator dynamics: a low-pass filter between
+    the commanded wheel torque and the torque actually delivered, modeling
+    finite spin-up/spin-down response instead of an instantaneous actuator.
+
+    (A, B, C) come from wheel_to_ss(cfg.wheel_tf_num, cfg.wheel_tf_den) --
+    built ONCE from the transfer function, so changing the actuator's
+    response is just editing those two coefficient lists in SimConfig, no
+    manual re-derivation of this function.
+
+    x       : (n_states, n_w) filter state, one column per wheel
+    tau_cmd : (n_w,) commanded torque per wheel (from allocate_wheel_torque)
+    Returns (x_dot, tau_actual): x_dot is (n_states, n_w); tau_actual (n_w,)
+    is the filtered torque to actually use in place of tau_cmd.
+    """
+    x_dot = A @ x + B @ tau_cmd.reshape(1, -1)
+    tau_actual = (C @ x).flatten()
+    return x_dot, tau_actual
 
 
 # =====================================================================
@@ -501,23 +554,35 @@ def pd_controller(q, omega, q_des, Kp, Kd, u_max=np.inf):
 #   total size = 13 + n_w   (= 17 for the 4-wheel default)
 # =====================================================================
 
-def pack_state(q, w, h_w, Ts, Tsd):
+def pack_state(q, w, h_w, Ts, Tsd, x_w=None):
     """Flatten the individual state pieces into the single 1-D vector y
     that scipy.integrate.solve_ivp requires (it only knows how to integrate
-    a flat array, not a structured collection of named quantities)."""
-    return np.concatenate([q, w, h_w, Ts, Tsd])
+    a flat array, not a structured collection of named quantities).
+
+    x_w is the (n_states, n_w) reaction-wheel actuator filter state
+    (see wheel_actuator_dynamics), flattened. Omit it (or pass None) when
+    wheel actuator dynamics are disabled -- it contributes zero extra
+    entries in that case, so the state vector size adjusts automatically."""
+    x_w_flat = np.zeros(0) if x_w is None else np.asarray(x_w).flatten()
+    return np.concatenate([q, w, h_w, Ts, Tsd, x_w_flat])
 
 
-def unpack_state(y, n_w):
+def unpack_state(y, n_w, n_wheel_states=0):
     """Inverse of pack_state(): slice the flat solver state vector y back
     into its named physical quantities. n_w (number of wheels) is needed
-    because it determines where the fixed-size Ts/Tsd blocks start."""
+    because it determines where the fixed-size Ts/Tsd blocks start;
+    n_wheel_states is the reaction-wheel actuator filter's order (0 when
+    wheel actuator dynamics are disabled, matching pack_state's default).
+
+    Returns (q, w, h_w, Ts, Tsd, x_w), where x_w is (n_wheel_states, n_w)."""
     q   = y[0:4]
     w   = y[4:7]
     h_w = y[7:7 + n_w]
     Ts  = y[7 + n_w : 10 + n_w]
     Tsd = y[10 + n_w : 13 + n_w]
-    return q, w, h_w, Ts, Tsd
+    x_w_flat = y[13 + n_w : 13 + n_w + n_wheel_states * n_w]
+    x_w = x_w_flat.reshape(n_wheel_states, n_w)
+    return q, w, h_w, Ts, Tsd, x_w
 
 
 # =====================================================================
@@ -537,7 +602,7 @@ def dynamics_rhs(t, y, params):
     the slosh second derivative.
     """
     # Unpack the flat solver state vector into named physical quantities.
-    q, w, h_w, Ts, Tsd = unpack_state(y, params['n_w'])
+    q, w, h_w, Ts, Tsd, x_w = unpack_state(y, params['n_w'], params['n_wheel_states'])
     W      = params['W']       # 3 x n_w wheel-axis mapping matrix
     W_pinv = params['W_pinv']  # its pseudoinverse, for torque allocation
 
@@ -562,12 +627,22 @@ def dynamics_rhs(t, y, params):
     #    With wheels OFF, the PD output drives the body directly and the wheel
     #    state is frozen (no momentum accumulation, no reaction torque).
     if params['enable_wheels']:
-        tau_w  = allocate_wheel_torque(u_cmd, W_pinv)   # per-wheel torque commands
-        u_act  = -W @ tau_w                # wheel reaction on the body (Newton's 3rd law)
-        h_body = W @ h_w                   # wheel momentum in body frame
+        tau_w_cmd = allocate_wheel_torque(u_cmd, W_pinv)   # per-wheel torque commands
+        if params['enable_wheel_dynamics']:
+            # Wheels don't respond instantly -- run the commanded torque
+            # through the actuator's low-pass filter (see
+            # wheel_actuator_dynamics) to get the torque actually delivered.
+            x_w_dot, tau_w = wheel_actuator_dynamics(
+                x_w, tau_w_cmd, params['wheel_A'], params['wheel_B'], params['wheel_C'])
+        else:
+            tau_w   = tau_w_cmd            # instantaneous actuator (as before)
+            x_w_dot = np.zeros((params['n_wheel_states'], params['n_w']))
+        u_act  = -W @ tau_w                 # wheel reaction on the body (Newton's 3rd law)
+        h_body = W @ h_w                    # wheel momentum in body frame
     else:
-        tau_w  = np.zeros(params['n_w'])
-        u_act  = u_cmd                     # ideal body-torque actuator
+        tau_w   = np.zeros(params['n_w'])
+        x_w_dot = np.zeros((params['n_wheel_states'], params['n_w']))
+        u_act  = u_cmd                      # ideal body-torque actuator
         h_body = np.zeros(3)
 
     # 4) Slosh torque on the body (zero if disabled). Ts is itself one of
@@ -585,7 +660,10 @@ def dynamics_rhs(t, y, params):
     #    attitude forward given the current spin rate w; h_dot integrates
     #    wheel momentum forward given the commanded wheel torques.
     q_dot = quat_kinematics(q, w)
-    h_dot = tau_w                          # zero when wheels disabled
+    h_dot = tau_w                          # zero when wheels disabled; the
+                                            # ACTUAL (post-filter) torque, so
+                                            # wheel spin-up matches what's
+                                            # really delivered to the body
 
     # 7) Slosh second-order ODE (uses w_dot just computed in step 5).
     #    NOTE ON CAUSALITY: w_dot depends on Ts (a STATE, already known at
@@ -606,7 +684,7 @@ def dynamics_rhs(t, y, params):
         Tsd_dot = np.zeros(3)
 
     # Re-flatten everything back into a single vector for solve_ivp.
-    return np.concatenate([q_dot, w_dot, h_dot, Ts_dot, Tsd_dot])
+    return np.concatenate([q_dot, w_dot, h_dot, Ts_dot, Tsd_dot, x_w_dot.flatten()])
 
 
 # =====================================================================
@@ -649,6 +727,18 @@ def simulate(cfg: SimConfig = None):
     n_w = W.shape[1]
     W_pinv = np.linalg.pinv(W)
 
+    # ---- Reaction-wheel actuator dynamics (optional low-pass filter) ----
+    # Built ONCE here from the transfer function coefficients (not per RHS
+    # evaluation) -- see wheel_to_ss()/wheel_actuator_dynamics(). When
+    # disabled, n_wheel_states=0 so the filter contributes no extra states
+    # and dynamics_rhs falls back to the instantaneous actuator.
+    if cfg.enable_wheel_dynamics:
+        wheel_A, wheel_B, wheel_C = wheel_to_ss(cfg.wheel_tf_num, cfg.wheel_tf_den)
+        n_wheel_states = wheel_A.shape[0]
+    else:
+        wheel_A = wheel_B = wheel_C = None
+        n_wheel_states = 0
+
     # ---- Initial state vector ----
     # .copy() everywhere so solve_ivp's internal state array never aliases
     # (and thus can never accidentally mutate) the SimConfig's own arrays --
@@ -658,7 +748,8 @@ def simulate(cfg: SimConfig = None):
                     cfg.w0.copy(),
                     np.zeros(n_w),           # wheels always start at rest
                     cfg.Ts0.copy(),
-                    cfg.Tsd0.copy())
+                    cfg.Tsd0.copy(),
+                    np.zeros((n_wheel_states, n_w)))   # wheel filter starts at rest
 
     # ---- Output time grid ----
     # This is ONLY the set of times at which solve_ivp reports back a
@@ -682,6 +773,9 @@ def simulate(cfg: SimConfig = None):
         'enable_slosh': cfg.enable_slosh,
         'enable_magnetorquer': cfg.enable_magnetorquer,
         'enable_wheels': cfg.enable_wheels,
+        'enable_wheel_dynamics': cfg.enable_wheel_dynamics,
+        'wheel_A': wheel_A, 'wheel_B': wheel_B, 'wheel_C': wheel_C,
+        'n_wheel_states': n_wheel_states,
     }
 
     # ---- Integrate ----
@@ -696,7 +790,7 @@ def simulate(cfg: SimConfig = None):
     print(f"solve_ivp: {sol.nfev} RHS evals, {sol.t.size} output samples")
 
     t = sol.t
-    Y = sol.y.T            # (N, 13 + n_w) -- transpose so rows are timesteps
+    Y = sol.y.T            # (N, 13 + n_w + n_wheel_states*n_w) -- rows are timesteps
     N = len(t)
 
     # ---- Extract state trajectories ----
@@ -706,6 +800,9 @@ def simulate(cfg: SimConfig = None):
     w_hist  = Y[:, 4:7]
     hw_hist = Y[:, 7:7 + n_w]
     Ts_hist = Y[:, 7 + n_w : 10 + n_w]
+    # Wheel actuator filter state history, (N, n_wheel_states, n_w); empty
+    # (n_wheel_states=0) when wheel actuator dynamics are disabled.
+    xw_hist = Y[:, 13 + n_w:].reshape(N, n_wheel_states, n_w)
     # Re-normalize quaternions (solve_ivp drift is small but nonzero).
     q_hist = q_hist / np.linalg.norm(q_hist, axis=1, keepdims=True)
 
@@ -732,8 +829,17 @@ def simulate(cfg: SimConfig = None):
         else:
             B_body, m_cmd, tau_mag = np.zeros(3), np.zeros(3), np.zeros(3)
         u_cmd, dq = pd_controller(q, w, cfg.q_des, cfg.Kp, cfg.Kd, cfg.u_max)
-        tau_w = (allocate_wheel_torque(u_cmd, W_pinv)
-                 if cfg.enable_wheels else np.zeros(n_w))
+        if not cfg.enable_wheels:
+            tau_w = np.zeros(n_w)
+        elif cfg.enable_wheel_dynamics:
+            # Use the ACTUAL (post-filter) torque consistent with what was
+            # really integrated, not the instantaneous command -- read from
+            # the wheel filter's own state/output rather than recomputing
+            # allocate_wheel_torque() alone (which would just give the
+            # unfiltered command and misrepresent what the wheel delivered).
+            tau_w = (wheel_C @ xw_hist[k]).flatten()
+        else:
+            tau_w = allocate_wheel_torque(u_cmd, W_pinv)
 
         dq_hist[k]   = dq
         u_hist[k]    = u_cmd
