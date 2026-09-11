@@ -83,7 +83,7 @@ def build_scenarios():
 
 def main():
     base_cfg = mc_example_72()
-    base_cfg.t_end = 6000.0     # long enough to see each maneuver settle
+    base_cfg.t_end = 600.0     # long enough to see each maneuver settle
     base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
     # Default Kd=150 leaves multi-axis slews with a persistent, non-decaying
     # oscillation (a genuine gyroscopic/coupling instability, confirmed

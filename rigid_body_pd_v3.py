@@ -184,20 +184,22 @@ def spicesat() -> SimConfig:
     default 4-wheel NASA pyramid (wheel_tilt_deg); only inertia, gains,
     and torque saturation differ from mc_example_71()/mc_example_72().
 
-    Kp=Kd=0.05 converge cleanly for single-axis and moderate (<=30 deg)
-    coupled multi-axis slews, settling in a few seconds. A 40/40/40 deg
-    near-cap coupled slew was found to be unstable at these gains (a
-    sustained, non-decaying oscillation) -- the same gyroscopic/wheel-
-    coupling instability mechanism documented for mc_example_72() at low
-    Kd (see project history). These gains are a starting point, not
-    validated across the full slew envelope; re-tune (raise Kd) if
-    large-angle multi-axis maneuvers are needed for this satellite.
+    Kp=0.05, Kd=10.0: with Kd raised well above Kp (unusual ratio, but
+    needed here), single-axis slews up to ~170 deg and moderate coupled
+    multi-axis slews (<=60 deg) converge cleanly. Large SIMULTANEOUS
+    multi-axis slews (e.g. 90/90/90) were found to remain unstable (a
+    sustained, non-decaying oscillation) even at this Kd -- the same
+    gyroscopic/wheel-coupling instability mechanism documented for
+    mc_example_72() -- and were not further resolved by raising Kd alone
+    (tested up to Kd=100). Single-axis and moderate coupled maneuvers are
+    the validated envelope for this preset; large simultaneous multi-axis
+    slews are a known open issue, not yet fixed.
     """
     cfg = SimConfig()
     cfg.Ixx, cfg.Iyy, cfg.Izz = 0.09579692958, 0.08815373599, 0.05163644679
     cfg.Ixy, cfg.Ixz, cfg.Iyz = 0.00285635546, 0.00349183595, 0.00514615995
     cfg.u_max = 0.005          # N*m, per-axis wheel/PD torque saturation
-    cfg.Kp, cfg.Kd = 0.05, 0.05
+    cfg.Kp, cfg.Kd = 0.05, 10.0
     return cfg
 
 
@@ -1103,8 +1105,8 @@ if __name__ == "__main__":
     #     SimConfig()         # baseline (= M&C Example 7.2)
     #     mc_example_71()
     #     mc_example_72()
-    cfg = mc_example_72()
-
+    #     cfg = mc_example_72()
+    cfg = spicesat()
     # Examples of in-place tweaks:
     cfg.enable_slosh = True
     # cfg.enable_magnetorquer = True
