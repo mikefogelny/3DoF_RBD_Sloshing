@@ -949,6 +949,38 @@ def plot_euler_and_rates(t, q_hist, w_hist):
     plt.tight_layout()
 
 
+def plot_transient_zoom(t, w_hist, tauw_hist, t_zoom=10.0):
+    """
+    Zoomed-in figure covering only the first `t_zoom` seconds: wheel
+    torque and body rate.
+
+    Over a full-length simulation (e.g. 600 s), the reaction-wheel
+    actuator's ramp-up (wheel_actuator_dynamics) only lasts a few seconds
+    -- on a plot spanning the whole run, that ramp gets compressed into
+    what looks like a near-vertical jump. This figure exists purely to
+    make that early transient actually visible.
+    """
+    mask = t <= t_zoom
+    n_w = tauw_hist.shape[1]
+    wheel_labels = [f"wheel {i+1}" for i in range(n_w)]
+
+    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+
+    ax[0].plot(t[mask], tauw_hist[mask])
+    ax[0].set_ylabel("Wheel torque (N·m)")
+    ax[0].legend(wheel_labels, loc="right")
+    ax[0].grid(True)
+
+    w_deg = np.rad2deg(w_hist)
+    ax[1].plot(t[mask], w_deg[mask])
+    ax[1].set_ylabel("Body rate (deg/s)")
+    ax[1].set_xlabel("Time (s)")
+    ax[1].legend([r"$\omega_x$", r"$\omega_y$", r"$\omega_z$"], loc="right")
+    ax[1].grid(True)
+
+    plt.tight_layout()
+
+
 def _scenario_start_target_deg(sc, cfg):
     """
     Return (q0_deg, qdes_deg) — human-readable [roll, pitch, yaw] degree
@@ -977,18 +1009,24 @@ def _scenario_start_target_deg(sc, cfg):
     return q0_deg, qdes_deg
 
 
-def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None):
+def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None, zoom_seconds=None):
     """
     Plot each trajectory from a `run_batch()` result in its own separate
     set of figure windows, labeled with its scenario index and, if
     available, its start/target Euler angles.
 
-    For each scenario this opens TWO figure windows:
+    For each scenario this opens TWO figure windows (THREE if
+    `zoom_seconds` is given):
         - the 9-panel `plot_results` figure (quaternion, error quaternion,
           body rate, control torque, wheel momentum/torque, magnetorquer
-          dipole/torque, slosh torque), and
+          dipole/torque, slosh torque),
         - the 2-panel `plot_euler_and_rates` figure (Euler angles, body
-          rates in deg).
+          rates in deg), and
+        - (optional) the 2-panel `plot_transient_zoom` figure, showing
+          only the first `zoom_seconds` -- useful for actually seeing the
+          reaction-wheel actuator ramp-up (see wheel_actuator_dynamics),
+          which is otherwise compressed to a near-vertical line on a plot
+          spanning the whole simulation.
 
     Parameters
     ----------
@@ -1002,9 +1040,13 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None):
         of q0/q_des if a scenario doesn't override them.
     save_dir : str, optional
         If given, save each figure as a PNG in this directory (created if
-        it doesn't already exist), named `scenario{i:02d}_telemetry.png`
-        and `scenario{i:02d}_angles.png`. Figures still open as normal
-        windows either way -- this only additionally writes them to disk.
+        it doesn't already exist), named `scenario{i:02d}_telemetry.png`,
+        `scenario{i:02d}_angles.png`, and (if `zoom_seconds` given)
+        `scenario{i:02d}_zoom.png`. Figures still open as normal windows
+        either way -- this only additionally writes them to disk.
+    zoom_seconds : float, optional
+        If given, also produce the early-transient zoom figure covering
+        [0, zoom_seconds] for each scenario.
     """
     if save_dir is not None:
         import os
@@ -1042,8 +1084,21 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None):
             fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_angles.png"),
                        dpi=150, bbox_inches="tight")
 
+        # Optional early-transient zoom figure.
+        if zoom_seconds is not None:
+            tauw_hist = results[6]
+            plot_transient_zoom(t, w_hist, tauw_hist, t_zoom=zoom_seconds)
+            fig = plt.gcf()
+            fig.suptitle(title)
+            fig.subplots_adjust(top=0.88)
+            fig.canvas.manager.set_window_title(title + " (zoom)")
+            if save_dir is not None:
+                fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_zoom.png"),
+                           dpi=150, bbox_inches="tight")
+
     if save_dir is not None:
-        print(f"Saved {2 * len(batch_results)} figures to {save_dir}")
+        n_figs = 3 if zoom_seconds is not None else 2
+        print(f"Saved {n_figs * len(batch_results)} figures to {save_dir}")
 
 
 # =====================================================================

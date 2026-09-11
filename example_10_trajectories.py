@@ -87,6 +87,9 @@ def main():
     base_cfg.t_end = 600.0     # long enough to see each maneuver settle
     base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
     base_cfg.enable_wheel_dynamics = True   # wheel torque ramps instead of jumping instantly
+    base_cfg.w0 = np.zeros(3)   # start at rest -- SimConfig's default w0=0.01 rad/s
+                                # per axis otherwise makes body rate look like it
+                                # "jumps" at t=0, when it's really just a nonzero IC
     # Default Kd=150 leaves multi-axis slews with a persistent, non-decaying
     # oscillation (a genuine gyroscopic/coupling instability, confirmed
     # independent of slosh and solver tolerance -- see project history).
@@ -100,7 +103,7 @@ def main():
     print(f"=== Running {len(scenarios)} trajectories ===")
     batch_results = run_batch(base_cfg, scenarios)
 
-    plot_batch(batch_results, scenarios, base_cfg, save_dir="plots")
+    plot_batch(batch_results, scenarios, base_cfg, save_dir="plots", zoom_seconds=10.0)
     plt.show()
 
     export_batch_to_mat(batch_results, scenarios, base_cfg,
