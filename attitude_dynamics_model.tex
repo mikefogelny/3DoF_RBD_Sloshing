@@ -150,6 +150,42 @@ axis and the four wheels are spaced $90^\circ$ apart in azimuth. This
 gives equal projection onto all three body axes and provides
 single-fault tolerance.
 
+\subsubsection{Reaction-Wheel Actuator Dynamics (Optional)}
+\label{sec:wheel-actuator}
+
+By default, each wheel is treated as an \emph{ideal} actuator: the
+allocated torque command $\bm{\tau}_{w,\text{cmd}}$ (Eq.~\ref{eq:wheel-alloc})
+is delivered to the body instantaneously. Real wheels cannot do this ---
+motor windings and rotor inertia impose a finite spin-up/spin-down
+response. This is optionally modelled (toggle \texttt{enable\_wheel\_dynamics},
+default off) as a per-wheel low-pass transfer function between the
+commanded and actually-delivered torque:
+\begin{equation}
+\frac{\tau_{w}(s)}{\tau_{w,\text{cmd}}(s)}
+\;=\;
+\frac{\text{num}(s)}{\text{den}(s)},
+\label{eq:wheel-tf}
+\end{equation}
+with $\text{num}(s)$, $\text{den}(s)$ given as plain coefficient lists
+(descending powers of $s$) in \texttt{SimConfig.wheel\_tf\_num} /
+\texttt{wheel\_tf\_den}. The illustrative default is
+\begin{equation}
+\frac{\tau_w(s)}{\tau_{w,\text{cmd}}(s)}
+\;=\;
+\frac{1.2\,s + 0.76}{s^2 + 2.4\,s + 0.76},
+\label{eq:wheel-tf-example}
+\end{equation}
+a second-order low-pass response. Any transfer function of any order can
+be substituted by editing only these two coefficient lists: the
+simulation converts $\text{num}(s)/\text{den}(s)$ to a state-space
+realisation $(\bm{A}, \bm{B}, \bm{C})$ automatically via a controllable
+canonical-form construction (equivalent to \texttt{scipy.signal.tf2ss}),
+so no manual re-derivation is required when the actuator model changes.
+Internally, this adds one extra filter state per wheel per transfer-function
+pole to the simulation state vector (Sec.~\ref{sec:state}); when the toggle
+is off, these states are simply absent ($\tau_w = \tau_{w,\text{cmd}}$,
+recovering the original instantaneous-actuator behaviour exactly).
+
 
 % ---------------------------------------------------------------------
 \subsection{Quaternion-Feedback PD Controller}
@@ -398,6 +434,102 @@ conflate:
         is exported separately as its own $T_{s,x}, T_{s,y}, T_{s,z}$
         columns.
 \end{enumerate}
+
+
+% ---------------------------------------------------------------------
+\subsection{Torque Signal Chain and Plotted/Exported Quantities}
+\label{sec:torque-chain}
+
+The preceding sections introduce several torque-like quantities in
+different places; this section collects them into a single signal
+chain, in the order the torque actually flows from controller to body,
+and states plainly which ones are directly visible in the plots/MATLAB
+export and which are internal-only. Confusing these is the single most
+common source of misreading the telemetry plots.
+
+\begin{enumerate}\setlength{\itemsep}{4pt}
+\item $\bm{u}_{\text{cmd}}$ (plotted as $T_c$) --- the PD controller's
+      raw output (Eq.~\ref{eq:pd}): \emph{``what net body torque does the
+      controller want?''} Computed directly from attitude/rate error,
+      before any allocation or actuator model.
+\item $\bm{\tau}_{w,\text{cmd}}$ (\emph{not} separately plotted) ---
+      $\bm{u}_{\text{cmd}}$ allocated across the $n_w$ physical wheels
+      (Eq.~\ref{eq:wheel-alloc}): \emph{``what should each wheel motor
+      do?''}
+\item $\bm{\tau}_w$ (plotted as \emph{Wheel torque}) --- the torque each
+      wheel \emph{actually delivers}. Equal to $\bm{\tau}_{w,\text{cmd}}$
+      when the wheel actuator dynamics of Sec.~\ref{sec:wheel-actuator}
+      are disabled (the default); otherwise the output of the low-pass
+      filter, Eq.~\ref{eq:wheel-tf}, lagging behind
+      $\bm{\tau}_{w,\text{cmd}}$.
+\item $\bm{u}_{\text{act}}$ (\emph{not} separately plotted) --- $\bm{\tau}_w$
+      converted back from ``per wheel'' to ``body $x,y,z$'' via
+      $\bm{u}_{\text{act}} = -\bm{W}\bm{\tau}_w$ (the wheel reaction onto
+      the body, Table~\ref{tab:u-body-terms}).
+\item $\bm{\tau}_{\text{mag}}$ (plotted as \emph{Mag.\ torque}) --- the
+      magnetorquer's momentum-dumping torque, Eq.~\ref{eq:bdot},
+      computed independently of the wheel/PD path.
+\item $\bm{T}_{\!s}$ (plotted as \emph{Slosh torque}) --- the propellant
+      slosh disturbance, an integrated state (Sec.~\ref{sec:slosh}), not
+      commanded by anything.
+\item $\bm{u}_{\text{body}}$ (\emph{not} separately plotted) --- the sum
+      of all three physical contributions, Eq.~\ref{eq:u-body-full}: the
+      one true net torque substituted into Euler's equation
+      (Eq.~\ref{eq:euler-wheels}) to produce $\dot{\bm{\omega}}$.
+\end{enumerate}
+
+Schematically, the chain is
+\begin{equation}
+\bm{u}_{\text{cmd}}
+\;\xrightarrow{\text{allocate, Eq.~\ref{eq:wheel-alloc}}}\;
+\bm{\tau}_{w,\text{cmd}}
+\;\xrightarrow{\text{actuator filter, Eq.~\ref{eq:wheel-tf}}}\;
+\bm{\tau}_w
+\;\xrightarrow{-\bm{W}(\cdot)}\;
+\bm{u}_{\text{act}}
+\;+\;
+\bm{\tau}_{\text{mag}}
+\;+\;
+\bm{T}_{\!s}
+\;=\;
+\bm{u}_{\text{body}}
+\;\longrightarrow\;
+\dot{\bm{\omega}}.
+\label{eq:torque-chain}
+\end{equation}
+
+Table~\ref{tab:torque-visibility} states exactly where each quantity can
+be seen (or cannot).
+
+\begin{table}[h]
+\centering
+\caption{Where each torque quantity in Eq.~\ref{eq:torque-chain} is
+visible in the plots and MATLAB export.}
+\label{tab:torque-visibility}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Quantity} & \textbf{Plotted (\texttt{plot\_results})} & \textbf{MATLAB export} \\
+\midrule
+$\bm{u}_{\text{cmd}}$      & $T_c$ panel               & --- \\
+$\bm{\tau}_{w,\text{cmd}}$ & ---                        & --- \\
+$\bm{\tau}_w$              & Wheel torque panel         & --- \\
+$\bm{u}_{\text{act}}$      & ---                        & (combined into $u_x,u_y,u_z$ below) \\
+$\bm{\tau}_{\text{mag}}$   & Mag.\ torque panel         & (combined into $u_x,u_y,u_z$ below) \\
+$\bm{u}_{\text{act}}+\bm{\tau}_{\text{mag}}$ & ---       & $u_x,u_y,u_z$ columns (Sec.~\ref{sec:matlab-export}) \\
+$\bm{T}_{\!s}$             & Slosh torque panel         & $T_{sx},T_{sy},T_{sz}$ columns \\
+$\bm{u}_{\text{body}}$     & ---                        & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A common point of confusion: enabling the wheel actuator dynamics
+(Sec.~\ref{sec:wheel-actuator}) visibly smooths the \emph{Wheel torque}
+panel and the exported $u_x,u_y,u_z$ columns (since both are downstream
+of $\bm{\tau}_w$) --- but the $T_c$ panel is $\bm{u}_{\text{cmd}}$,
+computed \emph{upstream} of the actuator filter, so it always looks
+instantaneous regardless of the actuator dynamics toggle. Looking at the
+$T_c$ panel to check whether the actuator filter is working is the
+single easiest way to draw the wrong conclusion from these plots.
 
 
 % ---------------------------------------------------------------------
