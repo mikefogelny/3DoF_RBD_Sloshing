@@ -176,6 +176,31 @@ def mc_example_72() -> SimConfig:
     return SimConfig()
 
 
+def spicesat() -> SimConfig:
+    """SPICEsat — small-satellite preset.
+
+    Inertia tensor converted from measured values in g*mm^2
+    (1 g*mm^2 = 1e-9 kg*m^2). Wheel geometry is unchanged from the
+    default 4-wheel NASA pyramid (wheel_tilt_deg); only inertia, gains,
+    and torque saturation differ from mc_example_71()/mc_example_72().
+
+    Kp=Kd=0.05 converge cleanly for single-axis and moderate (<=30 deg)
+    coupled multi-axis slews, settling in a few seconds. A 40/40/40 deg
+    near-cap coupled slew was found to be unstable at these gains (a
+    sustained, non-decaying oscillation) -- the same gyroscopic/wheel-
+    coupling instability mechanism documented for mc_example_72() at low
+    Kd (see project history). These gains are a starting point, not
+    validated across the full slew envelope; re-tune (raise Kd) if
+    large-angle multi-axis maneuvers are needed for this satellite.
+    """
+    cfg = SimConfig()
+    cfg.Ixx, cfg.Iyy, cfg.Izz = 0.09579692958, 0.08815373599, 0.05163644679
+    cfg.Ixy, cfg.Ixz, cfg.Iyz = 0.00285635546, 0.00349183595, 0.00514615995
+    cfg.u_max = 0.005          # N*m, per-axis wheel/PD torque saturation
+    cfg.Kp, cfg.Kd = 0.05, 0.05
+    return cfg
+
+
 # =====================================================================
 # Quaternion helpers (scalar-last convention)
 # =====================================================================
