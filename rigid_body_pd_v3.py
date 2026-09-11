@@ -333,6 +333,24 @@ def rigid_body_dynamics(omega, J, u_body, h_w_body=None):
     return np.linalg.solve(J, u_body - np.cross(omega, J @ omega + h_w_body))
 
 
+def build_wheel_matrix(wheel_tilt_deg):
+    """
+    Build the 3 x n_w wheel-axis configuration matrix W for the 4-wheel
+    NASA pyramid (M&C Sec. 7.2): spin axes tilted `wheel_tilt_deg` from
+    +Z, equally spaced 90 deg apart in azimuth.
+
+    Factored out here since it's needed in three places that must all
+    agree on the same wheel geometry: simulate() (to run the dynamics),
+    _build_trajectory_columns() (to reconstruct u_act for MATLAB export),
+    and plot_results() (to reconstruct u_act for the u_act panel).
+    """
+    beta = np.deg2rad(wheel_tilt_deg)
+    cb, sb = np.cos(beta), np.sin(beta)
+    return np.array([[ sb,   0.0, -sb,   0.0],
+                     [ 0.0,  sb,   0.0, -sb ],
+                     [ cb,   cb,   cb,   cb ]])           # (3 x n_w)
+
+
 def allocate_wheel_torque(u_cmd, W_pinv):
     """
     Pseudoinverse allocation of a body torque command to per-wheel torques:
@@ -718,12 +736,7 @@ def simulate(cfg: SimConfig = None):
     assert np.all(np.linalg.eigvalsh(J) > 0), "Inertia tensor must be positive-definite"
 
     # ---- Reaction-wheel configuration: 4-wheel NASA pyramid (M&C Sec. 7.2) ----
-    # Spin axes tilted `wheel_tilt_deg` from +Z, equally spaced 90° in azimuth.
-    beta = np.deg2rad(cfg.wheel_tilt_deg)
-    cb, sb = np.cos(beta), np.sin(beta)
-    W = np.array([[ sb,   0.0, -sb,   0.0],
-                  [ 0.0,  sb,   0.0, -sb ],
-                  [ cb,   cb,   cb,   cb ]])           # (3 x n_w)
+    W = build_wheel_matrix(cfg.wheel_tilt_deg)
     n_w = W.shape[1]
     W_pinv = np.linalg.pinv(W)
 
@@ -857,13 +870,24 @@ def simulate(cfg: SimConfig = None):
 # =====================================================================
 
 def plot_results(t, q_hist, dq_hist, w_hist, u_hist,
-                 hw_hist, tauw_hist, m_hist, tmag_hist, B_hist, Ts_hist):
-    """Main 9-panel telemetry figure: states + controller outputs + slosh.
+                 hw_hist, tauw_hist, m_hist, tmag_hist, B_hist, Ts_hist,
+                 cfg=None):
+    """Main 8-panel telemetry figure: states + controller outputs + slosh.
 
     Takes the full `results` tuple from simulate() unpacked as positional
-    args (call as `plot_results(*results)`); each panel is one physical
-    quantity's time history across all 3 (or n_w, for wheels) components."""
-    fig, ax = plt.subplots(9, 1, figsize=(10, 18), sharex=True)
+    args (call as `plot_results(*results, cfg=cfg)`); each panel is one
+    physical quantity's time history across all 3 (or n_w, for wheels)
+    components.
+
+    cfg (the SimConfig used to produce `results`) is required to
+    reconstruct u_act -- see build_wheel_matrix() -- since u_act depends
+    on wheel geometry and the enable_wheels toggle, neither of which is
+    part of the plain results tuple."""
+    if cfg is None:
+        raise ValueError("plot_results() requires cfg (the SimConfig used "
+                         "to produce `results`) to reconstruct u_act")
+
+    fig, ax = plt.subplots(8, 1, figsize=(10, 16), sharex=True)
 
     ax[0].plot(t, q_hist)
     ax[0].set_ylabel("Quaternion")
@@ -875,45 +899,47 @@ def plot_results(t, q_hist, dq_hist, w_hist, u_hist,
     ax[1].legend(["dq1", "dq2", "dq3", "dq4 (scalar)"], loc="right")
     ax[1].grid(True)
 
-    ax[2].plot(t, w_hist)
-    ax[2].set_ylabel("Body rate (rad/s)")
-    ax[2].legend([r"$\omega_x$", r"$\omega_y$", r"$\omega_z$"], loc="right")
+    N = len(t)
+    eul_deg = np.array([np.rad2deg(quat_to_euler321(q)) for q in q_hist])
+    ax[2].plot(t, eul_deg)
+    ax[2].set_ylabel("Euler angle (deg)")
+    ax[2].legend(["roll  ($\\phi$)", "pitch ($\\theta$)", "yaw  ($\\psi$)"], loc="right")
     ax[2].grid(True)
 
-    ax[3].plot(t, u_hist)
-#    ax[3].set_ylabel("Cmd body torque (N·m)")
-    ax[3].set_ylabel(r"$T_c$ (N·m)")
-    ax[3].legend([r"$T_{c,x}$", r"$T_{c,y}$", r"$T_{c,z}$"], loc="right")
+    ax[3].plot(t, w_hist)
+    ax[3].set_ylabel("Body rate (rad/s)")
+    ax[3].legend([r"$\omega_x$", r"$\omega_y$", r"$\omega_z$"], loc="right")
     ax[3].grid(True)
+
+    # u_act: the body-frame wheel-reaction torque alone (NOT combined with
+    # tau_mag -- that combined quantity is a separate thing, only used for
+    # the MATLAB export's ux,uy,uz columns; see attitude_dynamics_model.tex
+    # Sec. "Torque Signal Chain").
+    W = build_wheel_matrix(cfg.wheel_tilt_deg)
+    u_act = -(W @ tauw_hist.T).T if cfg.enable_wheels else u_hist
+    ax[4].plot(t, u_act)
+    ax[4].set_ylabel(r"$u_{act}$ (N·m)")
+    ax[4].legend([r"$u_{act,x}$", r"$u_{act,y}$", r"$u_{act,z}$"], loc="right")
+    ax[4].grid(True)
 
     n_w = hw_hist.shape[1]
     wheel_labels = [f"wheel {i+1}" for i in range(n_w)]
 
-    ax[4].plot(t, hw_hist)
-    ax[4].set_ylabel("Wheel momentum (N·m·s)")
-    ax[4].legend(wheel_labels, loc="right")
-    ax[4].grid(True)
-
-    ax[5].plot(t, tauw_hist)
-    ax[5].set_ylabel("Wheel torque (N·m)")
+    ax[5].plot(t, hw_hist)
+    ax[5].set_ylabel("Wheel momentum (N·m·s)")
     ax[5].legend(wheel_labels, loc="right")
     ax[5].grid(True)
 
-    ax[6].plot(t, m_hist)
-    ax[6].set_ylabel("Mag. dipole (A·m²)")
-    ax[6].legend([r"$m_x$", r"$m_y$", r"$m_z$"], loc="right")
+    ax[6].plot(t, tmag_hist)
+    ax[6].set_ylabel("Mag. torque (N·m)")
+    ax[6].legend([r"$\tau_{mag,x}$", r"$\tau_{mag,y}$", r"$\tau_{mag,z}$"], loc="right")
     ax[6].grid(True)
 
-    ax[7].plot(t, tmag_hist)
-    ax[7].set_ylabel("Mag. torque (N·m)")
-    ax[7].legend([r"$\tau_{mag,x}$", r"$\tau_{mag,y}$", r"$\tau_{mag,z}$"], loc="right")
+    ax[7].plot(t, Ts_hist)
+    ax[7].set_ylabel("Slosh torque $T_s$ (N·m)")
+    ax[7].set_xlabel("Time (s)")
+    ax[7].legend([r"$T_{s,x}$", r"$T_{s,y}$", r"$T_{s,z}$"], loc="right")
     ax[7].grid(True)
-
-    ax[8].plot(t, Ts_hist)
-    ax[8].set_ylabel("Slosh torque $T_s$ (N·m)")
-    ax[8].set_xlabel("Time (s)")
-    ax[8].legend([r"$T_{s,x}$", r"$T_{s,y}$", r"$T_{s,z}$"], loc="right")
-    ax[8].grid(True)
 
     plt.tight_layout()
 
@@ -1017,9 +1043,9 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None, zoom_seco
 
     For each scenario this opens TWO figure windows (THREE if
     `zoom_seconds` is given):
-        - the 9-panel `plot_results` figure (quaternion, error quaternion,
-          body rate, control torque, wheel momentum/torque, magnetorquer
-          dipole/torque, slosh torque),
+        - the 8-panel `plot_results` figure (quaternion, error quaternion,
+          Euler angles, body rate, u_act, wheel momentum, magnetorquer
+          torque, slosh torque),
         - the 2-panel `plot_euler_and_rates` figure (Euler angles, body
           rates in deg), and
         - (optional) the 2-panel `plot_transient_zoom` figure, showing
@@ -1059,8 +1085,8 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None, zoom_seco
             q0_deg, qdes_deg = _scenario_start_target_deg(sc, cfg or SimConfig())
             title += f"  start={np.round(q0_deg, 1)}  target={np.round(qdes_deg, 1)}"
 
-        # 9-panel telemetry figure (states + controller outputs + slosh).
-        plot_results(*results)
+        # 8-panel telemetry figure (states + controller outputs + slosh).
+        plot_results(*results, cfg=cfg)
         fig = plt.gcf()
         fig.suptitle(title)
         # plot_results()/plot_euler_and_rates() both call plt.tight_layout()
@@ -1134,11 +1160,7 @@ def _build_trajectory_columns(results, cfg):
 
     # Reconstruct u_act = -W @ tau_w (wheels on) or u_cmd (wheels off),
     # matching the actuator branch in dynamics_rhs.
-    beta = np.deg2rad(cfg.wheel_tilt_deg)
-    cb, sb = np.cos(beta), np.sin(beta)
-    W = np.array([[ sb,   0.0, -sb,   0.0],
-                  [ 0.0,  sb,   0.0, -sb ],
-                  [ cb,   cb,   cb,   cb ]])
+    W = build_wheel_matrix(cfg.wheel_tilt_deg)
     if cfg.enable_wheels:
         u_act = -(W @ tauw_hist.T).T
     else:
@@ -1276,6 +1298,6 @@ if __name__ == "__main__":
     # cfg.t_end = 600.0
 
     results = simulate(cfg)
-    plot_results(*results)
+    plot_results(*results, cfg=cfg)
     plot_euler_and_rates(results[0], results[1], results[3])
     plt.show()                                  # open both figures together
