@@ -351,6 +351,21 @@ def build_wheel_matrix(wheel_tilt_deg):
                      [ cb,   cb,   cb,   cb ]])           # (3 x n_w)
 
 
+def reconstruct_u_act(tauw_hist, u_hist, W, enable_wheels):
+    """
+    Reconstruct u_act (body-frame wheel-reaction torque) from a saved
+    wheel-torque history, matching the actuator branch in dynamics_rhs:
+        wheels ON:  u_act = -W @ tau_w
+        wheels OFF: u_act = u_cmd
+    tauw_hist, u_hist: (N, n_w) and (N, 3) histories from simulate().
+    Used by both plot_results() and _build_trajectory_columns() so the
+    two stay consistent with each other.
+    """
+    if enable_wheels:
+        return -(W @ tauw_hist.T).T
+    return u_hist
+
+
 def allocate_wheel_torque(u_cmd, W_pinv):
     """
     Pseudoinverse allocation of a body torque command to per-wheel torques:
@@ -916,7 +931,7 @@ def plot_results(t, q_hist, dq_hist, w_hist, u_hist,
     # the MATLAB export's ux,uy,uz columns; see attitude_dynamics_model.tex
     # Sec. "Torque Signal Chain").
     W = build_wheel_matrix(cfg.wheel_tilt_deg)
-    u_act = -(W @ tauw_hist.T).T if cfg.enable_wheels else u_hist
+    u_act = reconstruct_u_act(tauw_hist, u_hist, W, cfg.enable_wheels)
     ax[4].plot(t, u_act)
     ax[4].set_ylabel(r"$u_{act}$ (N·m)")
     ax[4].legend([r"$u_{act,x}$", r"$u_{act,y}$", r"$u_{act,z}$"], loc="right")
@@ -1057,13 +1072,9 @@ def _build_trajectory_columns(results, cfg):
     omega_dot = np.gradient(w_hist, t, axis=0)
     Fs = np.zeros((N, 3))
 
-    # Reconstruct u_act = -W @ tau_w (wheels on) or u_cmd (wheels off),
-    # matching the actuator branch in dynamics_rhs.
+    # Reconstruct u_act, matching the actuator branch in dynamics_rhs.
     W = build_wheel_matrix(cfg.wheel_tilt_deg)
-    if cfg.enable_wheels:
-        u_act = -(W @ tauw_hist.T).T
-    else:
-        u_act = u_hist
+    u_act = reconstruct_u_act(tauw_hist, u_hist, W, cfg.enable_wheels)
     control_torque = u_act + tmag_hist
 
     data = np.column_stack([t, angles, w_hist, omega_dot, control_torque, Ts_hist, Fs])
