@@ -103,7 +103,7 @@ def main():
     print(f"=== Running {len(scenarios)} trajectories ===")
     batch_results = run_batch(base_cfg, scenarios)
 
-    plot_batch(batch_results, scenarios, base_cfg, save_dir="plots", zoom_seconds=10.0)
+    plot_batch(batch_results, scenarios, base_cfg, save_dir="plots")
     plt.show()
 
     export_batch_to_mat(batch_results, scenarios, base_cfg,

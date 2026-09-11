@@ -944,69 +944,6 @@ def plot_results(t, q_hist, dq_hist, w_hist, u_hist,
     plt.tight_layout()
 
 
-def plot_euler_and_rates(t, q_hist, w_hist):
-    """Second figure: 3-2-1 Euler angles (deg) and body rates (deg/s)."""
-    N = len(t)
-    eul_deg = np.zeros((N, 3))
-    for k in range(N):
-        roll, pitch, yaw = quat_to_euler321(q_hist[k])
-        eul_deg[k] = np.rad2deg([roll, pitch, yaw])
-    w_deg = np.rad2deg(w_hist)
-
-    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-
-    ax[0].plot(t, eul_deg)
-    ax[0].set_ylabel("Euler angle (deg)")
-    ax[0].legend(["roll  ($\\phi$)", "pitch ($\\theta$)", "yaw  ($\\psi$)"], loc="right")
-    ax[0].grid(True)
-    # No ax[0].set_title() here -- when this figure is produced via
-    # plot_batch(), that function sets its own fig.suptitle() with the
-    # scenario's start/target angles; a second, static axis-level title
-    # would visually overlap it. When plot_euler_and_rates() is called
-    # standalone (not through plot_batch), the ylabel + legend already
-    # make the panel's content clear without a redundant title.
-
-    ax[1].plot(t, w_deg)
-    ax[1].set_ylabel("Body rate (deg/s)")
-    ax[1].set_xlabel("Time (s)")
-    ax[1].legend([r"$\omega_x$", r"$\omega_y$", r"$\omega_z$"], loc="right")
-    ax[1].grid(True)
-
-    plt.tight_layout()
-
-
-def plot_transient_zoom(t, w_hist, tauw_hist, t_zoom=10.0):
-    """
-    Zoomed-in figure covering only the first `t_zoom` seconds: wheel
-    torque and body rate.
-
-    Over a full-length simulation (e.g. 600 s), the reaction-wheel
-    actuator's ramp-up (wheel_actuator_dynamics) only lasts a few seconds
-    -- on a plot spanning the whole run, that ramp gets compressed into
-    what looks like a near-vertical jump. This figure exists purely to
-    make that early transient actually visible.
-    """
-    mask = t <= t_zoom
-    n_w = tauw_hist.shape[1]
-    wheel_labels = [f"wheel {i+1}" for i in range(n_w)]
-
-    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-
-    ax[0].plot(t[mask], tauw_hist[mask])
-    ax[0].set_ylabel("Wheel torque (N·m)")
-    ax[0].legend(wheel_labels, loc="right")
-    ax[0].grid(True)
-
-    w_deg = np.rad2deg(w_hist)
-    ax[1].plot(t[mask], w_deg[mask])
-    ax[1].set_ylabel("Body rate (deg/s)")
-    ax[1].set_xlabel("Time (s)")
-    ax[1].legend([r"$\omega_x$", r"$\omega_y$", r"$\omega_z$"], loc="right")
-    ax[1].grid(True)
-
-    plt.tight_layout()
-
-
 def _scenario_start_target_deg(sc, cfg):
     """
     Return (q0_deg, qdes_deg) — human-readable [roll, pitch, yaw] degree
@@ -1035,24 +972,15 @@ def _scenario_start_target_deg(sc, cfg):
     return q0_deg, qdes_deg
 
 
-def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None, zoom_seconds=None):
+def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None):
     """
     Plot each trajectory from a `run_batch()` result in its own separate
-    set of figure windows, labeled with its scenario index and, if
-    available, its start/target Euler angles.
+    figure window, labeled with its scenario index and, if available, its
+    start/target Euler angles.
 
-    For each scenario this opens TWO figure windows (THREE if
-    `zoom_seconds` is given):
-        - the 8-panel `plot_results` figure (quaternion, error quaternion,
-          Euler angles, body rate, u_act, wheel momentum, magnetorquer
-          torque, slosh torque),
-        - the 2-panel `plot_euler_and_rates` figure (Euler angles, body
-          rates in deg), and
-        - (optional) the 2-panel `plot_transient_zoom` figure, showing
-          only the first `zoom_seconds` -- useful for actually seeing the
-          reaction-wheel actuator ramp-up (see wheel_actuator_dynamics),
-          which is otherwise compressed to a near-vertical line on a plot
-          spanning the whole simulation.
+    For each scenario this opens the 8-panel `plot_results` figure
+    (quaternion, error quaternion, Euler angles, body rate, u_act, wheel
+    momentum, magnetorquer torque, slosh torque).
 
     Parameters
     ----------
@@ -1066,13 +994,9 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None, zoom_seco
         of q0/q_des if a scenario doesn't override them.
     save_dir : str, optional
         If given, save each figure as a PNG in this directory (created if
-        it doesn't already exist), named `scenario{i:02d}_telemetry.png`,
-        `scenario{i:02d}_angles.png`, and (if `zoom_seconds` given)
-        `scenario{i:02d}_zoom.png`. Figures still open as normal windows
-        either way -- this only additionally writes them to disk.
-    zoom_seconds : float, optional
-        If given, also produce the early-transient zoom figure covering
-        [0, zoom_seconds] for each scenario.
+        it doesn't already exist), named `scenario{i:02d}_telemetry.png`.
+        Figures still open as normal windows either way -- this only
+        additionally writes them to disk.
     """
     if save_dir is not None:
         import os
@@ -1089,42 +1013,17 @@ def plot_batch(batch_results, scenarios=None, cfg=None, save_dir=None, zoom_seco
         plot_results(*results, cfg=cfg)
         fig = plt.gcf()
         fig.suptitle(title)
-        # plot_results()/plot_euler_and_rates() both call plt.tight_layout()
-        # internally, BEFORE this suptitle is added -- so without reserving
-        # extra headroom here, the title can crowd or overlap the topmost
-        # subplot. subplots_adjust(top=...) carves out that headroom.
+        # plot_results() calls plt.tight_layout() internally, BEFORE this
+        # suptitle is added -- so without reserving extra headroom here,
+        # the title can crowd or overlap the topmost subplot.
         fig.subplots_adjust(top=0.94)
         fig.canvas.manager.set_window_title(title + " (telemetry)")
         if save_dir is not None:
             fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_telemetry.png"),
                        dpi=150, bbox_inches="tight")
 
-        # 2-panel Euler-angle + body-rate figure.
-        t, q_hist, w_hist = results[0], results[1], results[3]
-        plot_euler_and_rates(t, q_hist, w_hist)
-        fig = plt.gcf()
-        fig.suptitle(title)
-        fig.subplots_adjust(top=0.88)
-        fig.canvas.manager.set_window_title(title + " (angles)")
-        if save_dir is not None:
-            fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_angles.png"),
-                       dpi=150, bbox_inches="tight")
-
-        # Optional early-transient zoom figure.
-        if zoom_seconds is not None:
-            tauw_hist = results[6]
-            plot_transient_zoom(t, w_hist, tauw_hist, t_zoom=zoom_seconds)
-            fig = plt.gcf()
-            fig.suptitle(title)
-            fig.subplots_adjust(top=0.88)
-            fig.canvas.manager.set_window_title(title + " (zoom)")
-            if save_dir is not None:
-                fig.savefig(os.path.join(save_dir, f"scenario{i:02d}_zoom.png"),
-                           dpi=150, bbox_inches="tight")
-
     if save_dir is not None:
-        n_figs = 3 if zoom_seconds is not None else 2
-        print(f"Saved {n_figs * len(batch_results)} figures to {save_dir}")
+        print(f"Saved {len(batch_results)} figures to {save_dir}")
 
 
 # =====================================================================
@@ -1299,5 +1198,4 @@ if __name__ == "__main__":
 
     results = simulate(cfg)
     plot_results(*results, cfg=cfg)
-    plot_euler_and_rates(results[0], results[1], results[3])
-    plt.show()                                  # open both figures together
+    plt.show()
