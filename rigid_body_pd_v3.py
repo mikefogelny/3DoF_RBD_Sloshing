@@ -215,7 +215,7 @@ def spicesat() -> SimConfig:
     cfg.Ixx, cfg.Iyy, cfg.Izz = 0.09579692958, 0.08815373599, 0.05163644679
     cfg.Ixy, cfg.Ixz, cfg.Iyz = 0.00285635546, 0.00349183595, 0.00514615995
     cfg.u_max = 0.005          # N*m, per-axis wheel/PD torque saturation
-    cfg.Kp, cfg.Kd = 0.05, 1.0
+    cfg.Kp, cfg.Kd = 0.05, 10.0
     return cfg
 
 
