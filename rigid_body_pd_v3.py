@@ -91,9 +91,9 @@ class SimConfig:
     # just editing these two coefficient lists -- any filter order, no
     # manual state-space/canonical-form derivation needed (see
     # wheel_actuator_dynamics(), which builds the state-space realization
-    # automatically via scipy.signal.tf2ss). Default: instantaneous
-    # response (filter bypassed) unless enabled.
-    enable_wheel_dynamics: bool = False
+    # automatically via scipy.signal.tf2ss). Enabled by default -- set to
+    # False to fall back to an instantaneous (bang-bang) actuator.
+    enable_wheel_dynamics: bool = True
     wheel_tf_num: list = field(default_factory=lambda: [1.2, 0.76])       # 1.2*s + 0.76
     wheel_tf_den: list = field(default_factory=lambda: [1.0, 2.4, 0.76])  # s^2 + 2.4*s + 0.76
 
@@ -124,9 +124,13 @@ class SimConfig:
     # ratio of the sloshing mode, plus a saturation rate omega_max used to
     # scale the effective stiffness/damping as the body spin rate grows.
     slosh_testing_params: dict = field(default_factory=lambda: {
-        'omega_n':   0.08944,    # rad/s, sloshing-mode natural frequency
-        'zeta':      0.1286,     # sloshing-mode damping ratio
-        'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s)
+#        'omega_n':   0.08944,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
+#        'zeta':      0.1286,     # sloshing-mode damping ratio Default = 0.1286
+#        'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s) Defauly = 24 deg/sec = 0.418879
+        'omega_n':   0.125,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
+        'zeta':      0.1286,     # sloshing-mode damping ratio Default = 0.1286
+        'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s) Defauly = 24 deg/sec = 0.418879
+
     })
 
     # ---- Initial conditions ----
