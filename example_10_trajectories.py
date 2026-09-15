@@ -76,7 +76,9 @@ def build_scenarios():
         # 9: unequal magnitudes across axes (asymmetric coupling)
         _scenario((0, 0, 0), (20, 10, 5)),
         # 10: small-angle target, nonzero initial tumble
-        _scenario((0, 0, 0), (10, 10, 10), w0=np.array([0.05, -0.03, 0.02])),
+        _scenario((0, 0, 0), (10, 10, 10), 
+#        w0=np.array([0.05, -0.03, 0.02])),
+        w0=np.array([0.0, 0.0, 0.0])),
     ]
     return scenarios
 
@@ -110,5 +112,5 @@ def main():
                         filepath="ten_trajectories.mat")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main()

@@ -94,8 +94,11 @@ class SimConfig:
     # automatically via scipy.signal.tf2ss). Enabled by default -- set to
     # False to fall back to an instantaneous (bang-bang) actuator.
     enable_wheel_dynamics: bool = True
-    wheel_tf_num: list = field(default_factory=lambda: [1.2, 0.76])       # 1.2*s + 0.76
-    wheel_tf_den: list = field(default_factory=lambda: [1.0, 2.4, 0.76])  # s^2 + 2.4*s + 0.76
+#    wheel_tf_num: list = field(default_factory=lambda: [1.2, 0.76])       # 1.2*s + 0.76
+#    wheel_tf_den: list = field(default_factory=lambda: [1.0, 2.4, 0.76])  # s^2 + 2.4*s + 0.76
+    wheel_tf_num: list = field(default_factory=lambda: [1.0])       
+    wheel_tf_den: list = field(default_factory=lambda: [1.0, 1.0])  
+
 
     # ---- Slosh model selector: 'bourdelle' (default) or 'testing' ----
     # Two interchangeable second-order ODEs describe how sloshing propellant
@@ -185,7 +188,7 @@ def mc_example_71() -> SimConfig:
     q = np.array([0.6853, 0.6953, 0.1531, 0.1531])
     cfg.q0 = q / np.linalg.norm(q)      # re-normalize in case the book value isn't exactly unit
     cfg.w0 = np.array([0.53, 0.53, 0.053])      # rad/s -- a fairly aggressive initial tumble
-    cfg.t_end = 300.0
+    cfg.t_end = 20
     return cfg
 
 
@@ -220,6 +223,7 @@ def spicesat() -> SimConfig:
     cfg.Ixy, cfg.Ixz, cfg.Iyz = 0.00285635546, 0.00349183595, 0.00514615995
     cfg.u_max = 0.005          # N*m, per-axis wheel/PD torque saturation
     cfg.Kp, cfg.Kd = 0.05, 10.0
+    cfg.t_end = 600
     return cfg
 
 
@@ -1202,7 +1206,7 @@ if __name__ == "__main__":
     #     SimConfig()         # baseline (= M&C Example 7.2)
     #     mc_example_71()
     #     mc_example_72()
-    #     cfg = mc_example_72()
+    #cfg = mc_example_72()
     cfg = spicesat()
     # Examples of in-place tweaks:
     cfg.enable_slosh = True
