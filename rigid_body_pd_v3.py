@@ -94,10 +94,10 @@ class SimConfig:
     # automatically via scipy.signal.tf2ss). Enabled by default -- set to
     # False to fall back to an instantaneous (bang-bang) actuator.
     enable_wheel_dynamics: bool = True
-#    wheel_tf_num: list = field(default_factory=lambda: [1.2, 0.76])       # 1.2*s + 0.76
-#    wheel_tf_den: list = field(default_factory=lambda: [1.0, 2.4, 0.76])  # s^2 + 2.4*s + 0.76
-    wheel_tf_num: list = field(default_factory=lambda: [1.0])       
-    wheel_tf_den: list = field(default_factory=lambda: [1.0, 1.0])  
+    wheel_tf_num: list = field(default_factory=lambda: [1.2, 0.76])       # 1.2*s + 0.76
+    wheel_tf_den: list = field(default_factory=lambda: [1.0, 2.4, 0.76])  # s^2 + 2.4*s + 0.76
+#    wheel_tf_num: list = field(default_factory=lambda: [1.0])       
+#    wheel_tf_den: list = field(default_factory=lambda: [1.0, 1.0])  
 
 
     # ---- Slosh model selector: 'bourdelle' (default) or 'testing' ----
@@ -106,8 +106,8 @@ class SimConfig:
     # ONE is active per run — dynamics_rhs() branches on this string.
     # 'bourdelle' = the original slosh_dynamics_bourdelle() model.
     # 'testing'   = the newer rate-dependent slosh_dynamics_testing() model.
-#    slosh_model: str = 'bourdelle'
-    slosh_model: str = 'testing'
+    slosh_model: str = 'bourdelle'
+#    slosh_model: str = 'testing'
 
 
     # ---- Slosh model (bourdelle):  f(t) = nom + amp*sin(omega*t) ----
@@ -130,7 +130,7 @@ class SimConfig:
 #        'omega_n':   0.08944,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
 #        'zeta':      0.1286,     # sloshing-mode damping ratio Default = 0.1286
 #        'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s) Defauly = 24 deg/sec = 0.418879
-        'omega_n':   0.125,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
+        'omega_n':   0.08944,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
         'zeta':      0.1286,     # sloshing-mode damping ratio Default = 0.1286
         'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s) Defauly = 24 deg/sec = 0.418879
 
@@ -151,7 +151,7 @@ class SimConfig:
     Tsd0:  np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     # ---- Time grid ----
-    t_end:   float = 20 * 60.0    # seconds; total simulated duration
+    t_end:   float = 600.0    # seconds; total simulated duration
     dt_eval: float = 0.05         # output sample step (NOT the solver's internal step)
 
     # ---- Toggles ----
@@ -168,8 +168,8 @@ class SimConfig:
     # both have their own fast timescales that a fully adaptive step could
     # otherwise step over.
     method:   str   = 'RK45'      # 'RK45' | 'DOP853' | 'LSODA' | ...
-    rtol:     float = 1e-8
-    atol:     float = 1e-10
+    rtol:     float = 1e-6
+    atol:     float = 1e-6
     max_step: float = 0.5         # cap solver step for time-varying terms
 
 
@@ -221,9 +221,15 @@ def spicesat() -> SimConfig:
     cfg = SimConfig()
     cfg.Ixx, cfg.Iyy, cfg.Izz = 0.09579692958, 0.08815373599, 0.05163644679
     cfg.Ixy, cfg.Ixz, cfg.Iyz = 0.00285635546, 0.00349183595, 0.00514615995
-    cfg.u_max = 0.005          # N*m, per-axis wheel/PD torque saturation
-    cfg.Kp, cfg.Kd = 0.05, 10.0
+    cfg.u_max = 0.006          # N*m, per-axis wheel/PD torque saturation
+    cfg.Kp, cfg.Kd = 0.035, 10.00
     cfg.t_end = 600
+
+    # ---- Starting / target attitude, in degrees (roll, pitch, yaw) ----
+    # Edit these three numbers each to change where the satellite starts
+    # and where the PD controller commands it to settle.
+    cfg.q0    = euler321_to_quat(90, 0, 0)   # matches SimConfig's own default IC
+    cfg.q_des = euler321_to_quat(0, 0, 0)    # matches SimConfig's own default target
     return cfg
 
 
