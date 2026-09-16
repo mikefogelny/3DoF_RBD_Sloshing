@@ -29,7 +29,6 @@ Reference:
 
 import copy
 import math
-import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
@@ -83,33 +82,6 @@ class SimConfig:
     K_dump: float = 1.0      # 1/s,    magnetic momentum-dump gain
     m_max:  float = 500.0    # A·m^2,  per-axis magnetorquer dipole saturation
 
-    # ---- Attitude controller selector: 'pd' (default) or 'switching_curve' ----
-    # 'pd'              = pd_controller(): linear quaternion-feedback PD,
-    #                      saturated by clipping (Sec. 7.4-style law).
-    # 'switching_curve' = switching_curve_controller(): per-axis time-optimal
-    #                      bang-bang law using the parabolic switching curve
-    #                      omega^2 = 2*(u_max/I)*|angle_remaining|, so torque
-    #                      ramps to u_max, holds flat, then decelerates
-    #                      smoothly to arrive at the target near zero rate --
-    #                      avoiding the PD law's saturation-driven overshoot
-    #                      ("sawtooth"). Blends into the 'pd' law inside
-    #                      switching_deadband_deg of the target (pure bang-bang
-    #                      never truly settles -- it chatters at zero error).
-    #
-    #                      INCOMPATIBLE with enable_wheel_dynamics=True: the
-    #                      switching curve assumes torque reverses
-    #                      instantly. With the wheel actuator's low-pass lag
-    #                      enabled, delivered torque reverses ~1s late, so
-    #                      the body overshoots the intended switch point and
-    #                      the two features fight each other into a large
-    #                      sustained oscillation (confirmed by testing --
-    #                      not a hypothetical). simulate() warns (does not
-    #                      raise) if both are set; use 'switching_curve'
-    #                      only with enable_wheel_dynamics=False.
-    controller_type: str = 'pd'
-    switching_deadband_deg: float = 5.0   # per-axis angle-error threshold for
-                                          # handoff from bang-bang to PD
-
     # ---- Reaction-wheel actuator dynamics (2nd-order low-pass, per wheel) ----
     # Real wheels don't respond instantly -- they have finite spin-up/down
     # dynamics. Modeled here as a transfer function
@@ -158,9 +130,9 @@ class SimConfig:
 #        'omega_n':   0.08944,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
 #        'zeta':      0.1286,     # sloshing-mode damping ratio Default = 0.1286
 #        'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s) Defauly = 24 deg/sec = 0.418879
-        'omega_n':   0.05,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
-        'zeta':      0.1,     # sloshing-mode damping ratio Default = 0.1286
-        'omega_max': 0.9,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s) Defauly = 24 deg/sec = 0.418879
+        'omega_n':   0.125,    # rad/s, sloshing-mode natural frequency  Default = 0.08944
+        'zeta':      0.1286,     # sloshing-mode damping ratio Default = 0.1286
+        'omega_max': 0.418879,   # rad/s, max expected body rotation rate (SPICEsat: 24 deg/s) Defauly = 24 deg/sec = 0.418879
 
     })
 
@@ -249,10 +221,9 @@ def spicesat() -> SimConfig:
     cfg = SimConfig()
     cfg.Ixx, cfg.Iyy, cfg.Izz = 0.09579692958, 0.08815373599, 0.05163644679
     cfg.Ixy, cfg.Ixz, cfg.Iyz = 0.00285635546, 0.00349183595, 0.00514615995
-    cfg.u_max = 0.006         # N*m, per-axis wheel/PD torque saturation
-#    cfg.Kp, cfg.Kd = 0.05, 10.0
-    cfg.Kp, cfg.Kd = 0.035, 0.035
-    cfg.t_end = 1200
+    cfg.u_max = 0.005          # N*m, per-axis wheel/PD torque saturation
+    cfg.Kp, cfg.Kd = 0.05, 10.0
+    cfg.t_end = 600
     return cfg
 
 
@@ -618,67 +589,6 @@ def pd_controller(q, omega, q_des, Kp, Kd, u_max=np.inf):
     return u, dq
 
 
-def switching_curve_controller(q, omega, q_des, u_max, J, Kp, Kd, deadband_rad):
-    """
-    NOTE: assumes an instantaneous actuator. Do not pair with
-    enable_wheel_dynamics=True -- the wheel actuator's low-pass lag delays
-    the actual torque reversal past the computed switch point, which was
-    confirmed (by testing) to cause a large sustained oscillation instead
-    of the clean convergence this law is designed to produce. Use with
-    enable_wheel_dynamics=False (simulate() also warns if both are set).
-
-    Per-axis time-optimal (bang-bang) attitude control law, using the
-    classic parabolic switching curve for a torque-limited double
-    integrator (I*theta_ddot = u, |u| <= u_max):
-        switch when  omega^2 = 2*(u_max/I)*|angle_remaining|
-    Outside the switching curve, command full torque toward the target
-    (accelerate); on/past it, command full torque the other way
-    (decelerate), timed so the axis arrives at the target near zero rate.
-    This produces a ramp-to-max / flat-hold / smooth-decel-to-zero torque
-    profile instead of the PD law's saturation-driven overshoot ("sawtooth"),
-    since the deceleration point is computed from the equations of motion
-    rather than reacted to after the error has already shrunk.
-
-    Reuses the same quaternion error as pd_controller() (dq, dq_vec, dq4)
-    so both controllers agree on what "angle remaining" means; only the
-    control law applied to that error differs.
-
-    Pure bang-bang never settles -- it chatters at zero error -- so inside
-    `deadband_rad` of the target (per axis) this blends into the same
-    linear PD law pd_controller() uses, reusing Kp/Kd for fine settling.
-
-    J is the full 3x3 inertia tensor; only its diagonal is used here
-    (this control law treats each axis independently, same simplification
-    the existing PD + wheel-allocation path already makes -- it does not
-    account for cross-axis gyroscopic coupling).
-
-    Returns (u, dq), same shape as pd_controller(), so the two are
-    interchangeable at the call site.
-    """
-    dq = quat_multiply(quat_inverse(q_des), q)
-    dq_vec, dq4 = dq[0:3], dq[3]
-    sign4 = np.sign(dq4) if dq4 != 0.0 else 1.0
-
-    # Per-axis "angle remaining" (rad), small-angle proxy consistent with
-    # the restoring direction pd_controller() uses (-Kp*sign(dq4)*dq_vec):
-    # positive e_i means the axis needs positive torque to close the error.
-    e = -2.0 * sign4 * dq_vec
-
-    I_diag = np.array([J[0, 0], J[1, 1], J[2, 2]])
-    accel_max = u_max / I_diag
-
-    # Switching function: positive -> still room to accelerate toward the
-    # target; negative -> continuing would overshoot, so decelerate now.
-    switch_arg = e - np.sign(omega) * omega**2 / (2.0 * accel_max)
-    u_bang = u_max * np.sign(switch_arg)
-
-    u_pd = np.clip(-Kp * sign4 * dq_vec - Kd * omega, -u_max, u_max)
-
-    in_deadband = np.abs(e) <= deadband_rad
-    u = np.where(in_deadband, u_pd, u_bang)
-    return u, dq
-
-
 # =====================================================================
 # State packing for solve_ivp
 #   y = [ q (4) ; omega (3) ; h_w (n_w) ; Ts (3) ; Ts_dot (3) ]
@@ -748,18 +658,11 @@ def dynamics_rhs(t, y, params):
     else:
         tau_mag = np.zeros(3)
 
-    # 2) Attitude controller -> desired body torque. This runs
+    # 2) PD attitude controller -> desired body torque. This runs
     #    unconditionally (it's always "on"); what varies below is how its
-    #    output gets applied to the body. Exactly one of the two
-    #    interchangeable controllers is evaluated, selected by
-    #    params['controller_type'] (see SimConfig.controller_type).
-    if params['controller_type'] == 'switching_curve':
-        u_cmd, _ = switching_curve_controller(q, w, params['q_des'], params['u_max'],
-                                              params['J'], params['Kp'], params['Kd'],
-                                              params['switching_deadband_rad'])
-    else:
-        u_cmd, _ = pd_controller(q, w, params['q_des'],
-                                 params['Kp'], params['Kd'], params['u_max'])
+    #    output gets applied to the body.
+    u_cmd, _ = pd_controller(q, w, params['q_des'],
+                             params['Kp'], params['Kd'], params['u_max'])
 
     # 3) Actuator branch: reaction wheels (toggle) or ideal torque actuator.
     #    With wheels OFF, the PD output drives the body directly and the wheel
@@ -842,18 +745,6 @@ def simulate(cfg: SimConfig = None):
     if cfg is None:
         cfg = SimConfig()
 
-    if cfg.controller_type == 'switching_curve' and cfg.enable_wheel_dynamics:
-        warnings.warn(
-            "controller_type='switching_curve' with enable_wheel_dynamics=True: "
-            "the switching curve assumes instantaneous torque reversal, but the "
-            "wheel actuator's low-pass lag delays the actual reversal -- this "
-            "combination was confirmed (by testing) to produce a large sustained "
-            "oscillation instead of clean convergence. Set "
-            "enable_wheel_dynamics=False to use the switching-curve controller "
-            "as designed.",
-            stacklevel=2,
-        )
-
     # ---- Build the inertia tensor from independent components ----
     # Note the sign flip on the off-diagonal products of inertia: SimConfig
     # stores Ixy/Ixz/Iyz as positive magnitudes (M&C Eq. 3.13 convention),
@@ -921,8 +812,6 @@ def simulate(cfg: SimConfig = None):
         'enable_wheel_dynamics': cfg.enable_wheel_dynamics,
         'wheel_A': wheel_A, 'wheel_B': wheel_B, 'wheel_C': wheel_C,
         'n_wheel_states': n_wheel_states,
-        'controller_type': cfg.controller_type,
-        'switching_deadband_rad': np.deg2rad(cfg.switching_deadband_deg),
     }
 
     # ---- Integrate ----
@@ -975,12 +864,7 @@ def simulate(cfg: SimConfig = None):
             tau_mag = np.cross(m_cmd, B_body)
         else:
             B_body, m_cmd, tau_mag = np.zeros(3), np.zeros(3), np.zeros(3)
-        if cfg.controller_type == 'switching_curve':
-            u_cmd, dq = switching_curve_controller(
-                q, w, cfg.q_des, cfg.u_max, J, cfg.Kp, cfg.Kd,
-                np.deg2rad(cfg.switching_deadband_deg))
-        else:
-            u_cmd, dq = pd_controller(q, w, cfg.q_des, cfg.Kp, cfg.Kd, cfg.u_max)
+        u_cmd, dq = pd_controller(q, w, cfg.q_des, cfg.Kp, cfg.Kd, cfg.u_max)
         if not cfg.enable_wheels:
             tau_w = np.zeros(n_w)
         elif cfg.enable_wheel_dynamics:

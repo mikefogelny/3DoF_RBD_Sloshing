@@ -86,7 +86,7 @@ def build_scenarios():
 def main():
 #    base_cfg = mc_example_72()
     base_cfg = spicesat()
-    base_cfg.t_end = 1000.0     # long enough to see each maneuver settle
+    base_cfg.t_end = 600.0     # long enough to see each maneuver settle
     base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
     base_cfg.enable_wheel_dynamics = True   # wheel torque ramps instead of jumping instantly
     base_cfg.w0 = np.zeros(3)   # start at rest -- SimConfig's default w0=0.01 rad/s
