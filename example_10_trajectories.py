@@ -88,9 +88,7 @@ def main():
     base_cfg = spicesat()
     base_cfg.t_end = 1000.0     # long enough to see each maneuver settle
     base_cfg.enable_slosh = True   # otherwise Ts stays zero throughout
-    base_cfg.controller_type = 'switching_curve'   # time-optimal bang-bang instead of PD
-    base_cfg.enable_wheel_dynamics = False   # switching_curve requires instantaneous
-                                              # actuator -- see SimConfig.controller_type
+    base_cfg.enable_wheel_dynamics = True   # wheel torque ramps instead of jumping instantly
     base_cfg.w0 = np.zeros(3)   # start at rest -- SimConfig's default w0=0.01 rad/s
                                 # per axis otherwise makes body rate look like it
                                 # "jumps" at t=0, when it's really just a nonzero IC
